@@ -14,6 +14,12 @@ pub struct ModelSelector {
     pub current_model: String,
 }
 
+impl Default for ModelSelector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModelSelector {
     pub fn new() -> Self {
         Self {
@@ -115,6 +121,12 @@ pub struct AgentSelector {
     pub current: String,
 }
 
+impl Default for AgentSelector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AgentSelector {
     pub fn new() -> Self {
         Self {
@@ -212,6 +224,12 @@ pub struct CommandPalette {
     pub visible: bool,
     pub selected: usize,
     pub filtered: Vec<usize>,
+}
+
+impl Default for CommandPalette {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CommandPalette {
@@ -334,6 +352,12 @@ pub struct ThinkingSelector {
     pub current: ThinkingLevel,
 }
 
+impl Default for ThinkingSelector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ThinkingSelector {
     pub fn new() -> Self {
         Self {
@@ -391,6 +415,12 @@ pub struct SessionSelector {
     pub filtered: Vec<usize>,
     pub selected: usize,
     pub query: String,
+}
+
+impl Default for SessionSelector {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SessionSelector {

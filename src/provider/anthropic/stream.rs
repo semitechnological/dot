@@ -165,13 +165,13 @@ pub(super) async fn process_sse_stream(
                             let btype = block_types.get(&index).map(|s| s.as_str()).unwrap_or("");
                             if btype == "tool_use" {
                                 send!(StreamEventType::ToolUseEnd);
-                            } else if btype == "thinking" {
-                                if let Some(accum) = thinking_accums.remove(&index) {
-                                    send!(StreamEventType::ThinkingComplete {
-                                        thinking: accum.thinking,
-                                        signature: accum.signature,
-                                    });
-                                }
+                            } else if btype == "thinking"
+                                && let Some(accum) = thinking_accums.remove(&index)
+                            {
+                                send!(StreamEventType::ThinkingComplete {
+                                    thinking: accum.thinking,
+                                    signature: accum.signature,
+                                });
                             }
                             block_types.remove(&index);
                         }

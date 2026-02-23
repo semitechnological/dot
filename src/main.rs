@@ -182,12 +182,12 @@ fn build_anthropic(
             )),
         };
     }
-    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-        if !key.is_empty() {
-            return Some(Box::new(
-                dot::provider::anthropic::AnthropicProvider::new_with_api_key(key, model),
-            ));
-        }
+    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY")
+        && !key.is_empty()
+    {
+        return Some(Box::new(
+            dot::provider::anthropic::AnthropicProvider::new_with_api_key(key, model),
+        ));
     }
     None
 }
@@ -196,22 +196,22 @@ fn build_openai(
     creds: &dot::auth::Credentials,
     model: String,
 ) -> Option<Box<dyn dot::provider::Provider>> {
-    if let Some(cred) = creds.get("openai") {
-        if let Some(api_key) = cred.api_key() {
-            let oai_config =
-                async_openai::config::OpenAIConfig::new().with_api_key(api_key.to_string());
-            return Some(Box::new(
-                dot::provider::openai::OpenAIProvider::new_with_config(oai_config, model),
-            ));
-        }
+    if let Some(cred) = creds.get("openai")
+        && let Some(api_key) = cred.api_key()
+    {
+        let oai_config =
+            async_openai::config::OpenAIConfig::new().with_api_key(api_key.to_string());
+        return Some(Box::new(
+            dot::provider::openai::OpenAIProvider::new_with_config(oai_config, model),
+        ));
     }
-    if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-        if !key.is_empty() {
-            let oai_config = async_openai::config::OpenAIConfig::new().with_api_key(key);
-            return Some(Box::new(
-                dot::provider::openai::OpenAIProvider::new_with_config(oai_config, model),
-            ));
-        }
+    if let Ok(key) = std::env::var("OPENAI_API_KEY")
+        && !key.is_empty()
+    {
+        let oai_config = async_openai::config::OpenAIConfig::new().with_api_key(key);
+        return Some(Box::new(
+            dot::provider::openai::OpenAIProvider::new_with_config(oai_config, model),
+        ));
     }
     None
 }

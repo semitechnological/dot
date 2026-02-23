@@ -345,7 +345,7 @@ impl Provider for OpenAIProvider {
                                         reason,
                                         FinishReason::ToolCalls | FinishReason::FunctionCall
                                     ) {
-                                        for (_, accum) in &tool_accum {
+                                        for accum in tool_accum.values() {
                                             if accum.started {
                                                 let _ = tx_clone.send(StreamEvent {
                                                     event_type: StreamEventType::ToolUseEnd,
@@ -358,12 +358,12 @@ impl Provider for OpenAIProvider {
 
                                 let delta = choice.delta;
 
-                                if let Some(content) = delta.content {
-                                    if !content.is_empty() {
-                                        let _ = tx_clone.send(StreamEvent {
-                                            event_type: StreamEventType::TextDelta(content),
-                                        });
-                                    }
+                                if let Some(content) = delta.content
+                                    && !content.is_empty()
+                                {
+                                    let _ = tx_clone.send(StreamEvent {
+                                        event_type: StreamEventType::TextDelta(content),
+                                    });
                                 }
 
                                 if let Some(tool_call_chunks) = delta.tool_calls {
@@ -371,17 +371,17 @@ impl Provider for OpenAIProvider {
                                         let idx = chunk.index;
                                         let entry = tool_accum.entry(idx).or_default();
 
-                                        if let Some(id) = chunk.id {
-                                            if !id.is_empty() {
-                                                entry.id = id;
-                                            }
+                                        if let Some(id) = chunk.id
+                                            && !id.is_empty()
+                                        {
+                                            entry.id = id;
                                         }
 
                                         if let Some(func) = chunk.function {
-                                            if let Some(name) = func.name {
-                                                if !name.is_empty() {
-                                                    entry.name = name;
-                                                }
+                                            if let Some(name) = func.name
+                                                && !name.is_empty()
+                                            {
+                                                entry.name = name;
                                             }
 
                                             if !entry.started
@@ -401,17 +401,15 @@ impl Provider for OpenAIProvider {
                                                 );
                                             }
 
-                                            if let Some(args) = func.arguments {
-                                                if !args.is_empty() {
-                                                    entry.arguments.push_str(&args);
-                                                    let _ =
-                                                        tx_clone.send(StreamEvent {
-                                                            event_type:
-                                                                StreamEventType::ToolUseInputDelta(
-                                                                    args,
-                                                                ),
-                                                        });
-                                                }
+                                            if let Some(args) = func.arguments
+                                                && !args.is_empty()
+                                            {
+                                                entry.arguments.push_str(&args);
+                                                let _ = tx_clone.send(StreamEvent {
+                                                    event_type: StreamEventType::ToolUseInputDelta(
+                                                        args,
+                                                    ),
+                                                });
                                             }
                                         }
                                     }
@@ -421,7 +419,7 @@ impl Provider for OpenAIProvider {
                     }
                 }
 
-                for (_, accum) in &tool_accum {
+                for accum in tool_accum.values() {
                     if accum.started {
                         let _ = tx_clone.send(StreamEvent {
                             event_type: StreamEventType::ToolUseEnd,

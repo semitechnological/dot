@@ -35,12 +35,11 @@ impl SkillRegistry {
                     continue;
                 }
                 let skill_file = skill_dir.join("SKILL.md");
-                if skill_file.exists() {
-                    if let Some(info) = Self::parse_skill(&skill_file) {
-                        if seen_names.insert(info.name.clone()) {
-                            skills.push(info);
-                        }
-                    }
+                if skill_file.exists()
+                    && let Some(info) = Self::parse_skill(&skill_file)
+                    && seen_names.insert(info.name.clone())
+                {
+                    skills.push(info);
                 }
             }
         }
@@ -70,9 +69,9 @@ impl SkillRegistry {
         let content = fs::read_to_string(path).ok()?;
         let name = path.parent()?.file_name()?.to_string_lossy().to_string();
 
-        let description = if content.starts_with("---") {
-            if let Some(end) = content[3..].find("---") {
-                let frontmatter = &content[3..3 + end];
+        let description = if let Some(stripped) = content.strip_prefix("---") {
+            if let Some(end) = stripped.find("---") {
+                let frontmatter = &stripped[..end];
                 Self::extract_field(frontmatter, "description")
                     .unwrap_or_else(|| Self::first_meaningful_line(&content, 3 + end + 3))
             } else {

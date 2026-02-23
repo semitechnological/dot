@@ -15,24 +15,23 @@ pub fn detect_terminal_background() -> TerminalBackground {
         }
     }
 
-    if let Ok(val) = std::env::var("COLORFGBG") {
-        if let Some(bg_str) = val.rsplit(';').next() {
-            if let Ok(bg) = bg_str.trim().parse::<u8>() {
-                return if bg < 8 || (bg >= 16 && bg < 232 + 12) && bg >= 232 {
-                    TerminalBackground::Dark
-                } else if bg >= 8 && bg <= 15 {
-                    TerminalBackground::Light
-                } else {
-                    TerminalBackground::Dark
-                };
-            }
-        }
+    if let Ok(val) = std::env::var("COLORFGBG")
+        && let Some(bg_str) = val.rsplit(';').next()
+        && let Ok(bg) = bg_str.trim().parse::<u8>()
+    {
+        return if bg < 8 || (232..232 + 12).contains(&bg) {
+            TerminalBackground::Dark
+        } else if (8..=15).contains(&bg) {
+            TerminalBackground::Light
+        } else {
+            TerminalBackground::Dark
+        };
     }
 
-    if let Ok(term_program) = std::env::var("TERM_PROGRAM") {
-        if term_program.to_lowercase().contains("apple_terminal") {
-            return TerminalBackground::Light;
-        }
+    if let Ok(term_program) = std::env::var("TERM_PROGRAM")
+        && term_program.to_lowercase().contains("apple_terminal")
+    {
+        return TerminalBackground::Light;
     }
 
     TerminalBackground::Dark

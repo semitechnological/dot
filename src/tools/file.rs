@@ -77,12 +77,11 @@ impl Tool for WriteFileTool {
             .context("Missing required parameter 'content'")?;
         tracing::debug!("write_file: {}", path);
 
-        if let Some(parent) = Path::new(path).parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent).with_context(|| {
-                    format!("Failed to create parent directories for: {}", path)
-                })?;
-            }
+        if let Some(parent) = Path::new(path).parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create parent directories for: {}", path))?;
         }
 
         fs::write(path, content).with_context(|| format!("Failed to write file: {}", path))?;

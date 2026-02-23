@@ -217,13 +217,13 @@ impl App {
                 });
             }
             AgentEvent::Compacted { messages_removed } => {
-                if let Some(last) = self.messages.last_mut() {
-                    if last.role == "compact" {
-                        last.content = format!(
-                            "\u{26a1} compacted \u{2014} {} messages summarized",
-                            messages_removed
-                        );
-                    }
+                if let Some(last) = self.messages.last_mut()
+                    && last.role == "compact"
+                {
+                    last.content = format!(
+                        "\u{26a1} compacted \u{2014} {} messages summarized",
+                        messages_removed
+                    );
                 }
             }
         }

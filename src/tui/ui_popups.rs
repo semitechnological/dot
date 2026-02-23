@@ -16,9 +16,8 @@ pub fn draw_model_selector(frame: &mut Frame, app: &mut App) {
 
     let mut content_lines: Vec<Line<'static>> = Vec::new();
     let mut last_provider: Option<&str> = None;
-    let mut item_idx = 0usize;
 
-    for &entry_idx in &sel.filtered {
+    for (item_idx, &entry_idx) in sel.filtered.iter().enumerate() {
         let entry = &sel.entries[entry_idx];
 
         if last_provider != Some(&entry.provider) {
@@ -47,7 +46,6 @@ pub fn draw_model_selector(frame: &mut Frame, app: &mut App) {
             format!("  {}{} ", marker, entry.model),
             style,
         )));
-        item_idx += 1;
     }
 
     if sel.filtered.is_empty() {
@@ -341,9 +339,8 @@ pub fn draw_session_selector(frame: &mut Frame, app: &mut App) {
     }
 
     let mut content_lines: Vec<Line<'static>> = Vec::new();
-    let mut item_idx = 0usize;
 
-    for &entry_idx in &sel.filtered {
+    for (item_idx, &entry_idx) in sel.filtered.iter().enumerate() {
         let entry = &sel.entries[entry_idx];
         let style = if item_idx == sel.selected {
             app.theme.highlight
@@ -359,7 +356,6 @@ pub fn draw_session_selector(frame: &mut Frame, app: &mut App) {
             Span::styled(format!("  {}", entry.title), style),
             Span::styled(format!("  {}", entry.subtitle), dim),
         ]));
-        item_idx += 1;
     }
 
     if sel.filtered.is_empty() && !sel.query.is_empty() {

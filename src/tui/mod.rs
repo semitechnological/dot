@@ -86,6 +86,7 @@ fn print_exit_screen(info: &ExitInfo) {
     println!();
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_app(
     terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stderr>>,
     config: Config,
@@ -184,9 +185,10 @@ async fn run_app(
             match events.next().await {
                 Some(AppEvent::Key(key)) => {
                     let action = input::handle_key(&mut app, key);
-                    match dispatch_action(&mut app, &agent, action, &mut agent_rx).await {
-                        LoopSignal::Quit => break,
-                        _ => {}
+                    if let LoopSignal::Quit =
+                        dispatch_action(&mut app, &agent, action, &mut agent_rx).await
+                    {
+                        break;
                     }
                 }
                 Some(AppEvent::Agent(ev)) => {
@@ -194,9 +196,10 @@ async fn run_app(
                 }
                 Some(AppEvent::Mouse(mouse)) => {
                     let action = input::handle_mouse(&mut app, mouse);
-                    match dispatch_action(&mut app, &agent, action, &mut agent_rx).await {
-                        LoopSignal::Quit => break,
-                        _ => {}
+                    if let LoopSignal::Quit =
+                        dispatch_action(&mut app, &agent, action, &mut agent_rx).await
+                    {
+                        break;
                     }
                 }
                 Some(AppEvent::Tick) => {

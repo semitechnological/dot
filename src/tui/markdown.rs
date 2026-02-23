@@ -187,6 +187,7 @@ fn render_code_block(
     }
 }
 
+#[allow(clippy::while_let_on_iterator)]
 fn parse_inline(text: &str, theme: &Theme) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut chars = text.char_indices().peekable();
@@ -223,12 +224,10 @@ fn parse_inline(text: &str, theme: &Theme) -> Vec<Span<'static>> {
                     let mut bold_text = String::new();
                     let mut closed = false;
                     while let Some((_, ch)) = chars.next() {
-                        if ch == '*' {
-                            if chars.peek().map(|(_, c)| *c == '*').unwrap_or(false) {
-                                chars.next();
-                                closed = true;
-                                break;
-                            }
+                        if ch == '*' && chars.peek().map(|(_, c)| *c == '*').unwrap_or(false) {
+                            chars.next();
+                            closed = true;
+                            break;
                         }
                         bold_text.push(ch);
                     }

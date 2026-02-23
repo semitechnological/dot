@@ -327,11 +327,8 @@ fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
     }
 
     if app.is_streaming {
-        match key.code {
-            KeyCode::Esc => {
-                app.mode = AppMode::Normal;
-            }
-            _ => {}
+        if key.code == KeyCode::Esc {
+            app.mode = AppMode::Normal;
         }
         return InputAction::None;
     }
@@ -403,35 +400,33 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
 
     match mouse.kind {
         MouseEventKind::ScrollUp => {
-            if app.model_selector.visible {
-                if let Some(popup) = app.layout.model_selector {
-                    if rect_contains(popup, col, row) {
-                        app.model_selector.up();
-                        return InputAction::None;
-                    }
-                }
+            if app.model_selector.visible
+                && let Some(popup) = app.layout.model_selector
+                && rect_contains(popup, col, row)
+            {
+                app.model_selector.up();
+                return InputAction::None;
             }
             InputAction::ScrollUp(3)
         }
         MouseEventKind::ScrollDown => {
-            if app.model_selector.visible {
-                if let Some(popup) = app.layout.model_selector {
-                    if rect_contains(popup, col, row) {
-                        app.model_selector.down();
-                        return InputAction::None;
-                    }
-                }
+            if app.model_selector.visible
+                && let Some(popup) = app.layout.model_selector
+                && rect_contains(popup, col, row)
+            {
+                app.model_selector.down();
+                return InputAction::None;
             }
             InputAction::ScrollDown(3)
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            if app.model_selector.visible {
-                if let Some(popup) = app.layout.model_selector {
-                    if !rect_contains(popup, col, row) {
-                        app.model_selector.close();
-                    }
-                    return InputAction::None;
+            if app.model_selector.visible
+                && let Some(popup) = app.layout.model_selector
+            {
+                if !rect_contains(popup, col, row) {
+                    app.model_selector.close();
                 }
+                return InputAction::None;
             }
 
             if app.agent_selector.visible {
@@ -439,51 +434,53 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 return InputAction::None;
             }
 
-            if app.thinking_selector.visible {
-                if let Some(popup) = app.layout.thinking_selector {
-                    if rect_contains(popup, col, row) {
-                        let relative_row = row.saturating_sub(popup.y + 1) as usize;
-                        if relative_row < ThinkingLevel::all().len() {
-                            app.thinking_selector.selected = relative_row;
-                            if let Some(level) = app.thinking_selector.confirm() {
-                                let budget = level.budget_tokens();
-                                app.thinking_budget = budget;
-                                return InputAction::SetThinkingLevel(budget);
-                            }
-                        }
-                    } else {
-                        app.thinking_selector.close();
+            if app.thinking_selector.visible
+                && let Some(popup) = app.layout.thinking_selector
+                && rect_contains(popup, col, row)
+            {
+                let relative_row = row.saturating_sub(popup.y + 1) as usize;
+                if relative_row < ThinkingLevel::all().len() {
+                    app.thinking_selector.selected = relative_row;
+                    if let Some(level) = app.thinking_selector.confirm() {
+                        let budget = level.budget_tokens();
+                        app.thinking_budget = budget;
+                        return InputAction::SetThinkingLevel(budget);
                     }
-                    return InputAction::None;
                 }
+            } else if app.thinking_selector.visible
+                && let Some(popup) = app.layout.thinking_selector
+            {
+                if !rect_contains(popup, col, row) {
+                    app.thinking_selector.close();
+                }
+                return InputAction::None;
             }
 
-            if app.session_selector.visible {
-                if let Some(popup) = app.layout.session_selector {
-                    if !rect_contains(popup, col, row) {
-                        app.session_selector.close();
-                    }
-                    return InputAction::None;
-                }
+            if app.session_selector.visible
+                && let Some(popup) = app.layout.session_selector
+                && !rect_contains(popup, col, row)
+            {
+                app.session_selector.close();
+                return InputAction::None;
             }
 
-            if app.command_palette.visible {
-                if let Some(popup) = app.layout.command_palette {
-                    if rect_contains(popup, col, row) {
-                        let relative_row = row.saturating_sub(popup.y) as usize;
-                        if relative_row < app.command_palette.filtered.len() {
-                            app.command_palette.selected = relative_row;
-                            if let Some(cmd_name) = app.command_palette.confirm() {
-                                app.input.clear();
-                                app.cursor_pos = 0;
-                                return execute_command(app, cmd_name);
-                            }
+            if app.command_palette.visible
+                && let Some(popup) = app.layout.command_palette
+            {
+                if rect_contains(popup, col, row) {
+                    let relative_row = row.saturating_sub(popup.y) as usize;
+                    if relative_row < app.command_palette.filtered.len() {
+                        app.command_palette.selected = relative_row;
+                        if let Some(cmd_name) = app.command_palette.confirm() {
+                            app.input.clear();
+                            app.cursor_pos = 0;
+                            return execute_command(app, cmd_name);
                         }
-                        return InputAction::None;
-                    } else {
-                        app.command_palette.close();
-                        return InputAction::None;
                     }
+                    return InputAction::None;
+                } else {
+                    app.command_palette.close();
+                    return InputAction::None;
                 }
             }
 

@@ -12,6 +12,12 @@ pub enum AppEvent {
     Resize(u16, u16),
 }
 
+impl Default for EventHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct EventHandler {
     rx: mpsc::UnboundedReceiver<AppEvent>,
     tx: mpsc::UnboundedSender<AppEvent>,
@@ -32,10 +38,10 @@ impl EventHandler {
                     maybe_event = reader.next() => {
                         match maybe_event {
                             Some(Ok(CEvent::Key(key))) => {
-                                if key.kind == KeyEventKind::Press {
-                                    if event_tx.send(AppEvent::Key(key)).is_err() {
-                                        return;
-                                    }
+                                if key.kind == KeyEventKind::Press
+                                    && event_tx.send(AppEvent::Key(key)).is_err()
+                                {
+                                    return;
                                 }
                             }
                             Some(Ok(CEvent::Mouse(mouse))) => {
@@ -45,10 +51,10 @@ impl EventHandler {
                                         | MouseEventKind::ScrollUp
                                         | MouseEventKind::ScrollDown
                                 );
-                                if dominated {
-                                    if event_tx.send(AppEvent::Mouse(mouse)).is_err() {
-                                        return;
-                                    }
+                                if dominated
+                                    && event_tx.send(AppEvent::Mouse(mouse)).is_err()
+                                {
+                                    return;
                                 }
                             }
                             Some(Ok(CEvent::Resize(w, h))) => {

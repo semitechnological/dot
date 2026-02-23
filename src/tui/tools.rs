@@ -135,10 +135,10 @@ pub fn extract_tool_detail(name: &str, input: &str) -> String {
 }
 
 fn shorten_path(path: &str) -> String {
-    if let Ok(home) = std::env::var("HOME") {
-        if let Some(rest) = path.strip_prefix(&home) {
-            return format!("~{}", rest);
-        }
+    if let Ok(home) = std::env::var("HOME")
+        && let Some(rest) = path.strip_prefix(&home)
+    {
+        return format!("~{}", rest);
     }
     if let Ok(cwd) = std::env::current_dir() {
         let cwd_str = cwd.to_string_lossy();

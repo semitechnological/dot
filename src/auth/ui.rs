@@ -64,16 +64,15 @@ pub(super) fn select_from_menu(prompt: &str, items: &[&str]) -> Result<Option<us
         )?;
         stdout.flush()?;
 
-        match event::read()? {
-            Event::Key(KeyEvent {
-                code,
-                kind: KeyEventKind::Press,
-                ..
-            }) => match code {
+        if let Event::Key(KeyEvent {
+            code,
+            kind: KeyEventKind::Press,
+            ..
+        }) = event::read()?
+        {
+            match code {
                 KeyCode::Up => {
-                    if selected > 0 {
-                        selected -= 1;
-                    }
+                    selected = selected.saturating_sub(1);
                 }
                 KeyCode::Down => {
                     if selected < items.len() - 1 {
@@ -83,8 +82,7 @@ pub(super) fn select_from_menu(prompt: &str, items: &[&str]) -> Result<Option<us
                 KeyCode::Enter => return Ok(Some(selected)),
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(None),
                 _ => {}
-            },
-            _ => {}
+            }
         }
     })();
 
@@ -112,12 +110,13 @@ pub(super) fn read_input_raw(prompt: &str, mask: bool) -> Result<String> {
     let mut input = String::new();
 
     let result: Result<String> = (|| loop {
-        match event::read()? {
-            Event::Key(KeyEvent {
-                code,
-                kind: KeyEventKind::Press,
-                ..
-            }) => match code {
+        if let Event::Key(KeyEvent {
+            code,
+            kind: KeyEventKind::Press,
+            ..
+        }) = event::read()?
+        {
+            match code {
                 KeyCode::Enter => {
                     execute!(stdout, Print("\r\n"))?;
                     return Ok(input.clone());
@@ -140,8 +139,7 @@ pub(super) fn read_input_raw(prompt: &str, mask: bool) -> Result<String> {
                     }
                 }
                 _ => {}
-            },
-            _ => {}
+            }
         }
         stdout.flush()?;
     })();

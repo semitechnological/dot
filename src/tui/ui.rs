@@ -184,15 +184,13 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             if chars == 0 {
                 1
             } else {
-                ((chars as u32 + inner.width as u32 - 1) / inner.width as u32).max(1)
+                (chars as u32).div_ceil(inner.width as u32).max(1)
             }
         })
         .sum();
     let visible = inner.height as u32;
     app.max_scroll = total_visual.saturating_sub(visible).min(u16::MAX as u32) as u16;
-    if app.follow_bottom {
-        app.scroll_offset = app.max_scroll;
-    } else if app.scroll_offset > app.max_scroll {
+    if app.follow_bottom || app.scroll_offset > app.max_scroll {
         app.scroll_offset = app.max_scroll;
     }
 

@@ -1,7 +1,14 @@
+use std::sync::LazyLock;
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
 
 use crate::tui::theme::Theme;
+
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
     if max_width == 0 {
@@ -176,14 +183,50 @@ fn render_code_block(
         )));
     }
 
-    let code_style = Style::default().fg(Color::White).bg(theme.code_bg);
-
-    for line in code_lines {
-        output.push(Line::from(Span::styled(format!("  {}", line), code_style)));
-    }
-
-    if code_lines.is_empty() {
-        output.push(Line::from(Span::styled("  ", code_style)));
+    if let Some(syntect_theme_name) = theme.syntect_theme
+        && !lang.is_empty()
+        && let Some(syntax) = SYNTAX_SET.find_syntax_by_token(lang)
+        && let Some(st_theme) = THEME_SET.themes.get(syntect_theme_name)
+    {
+        let mut highlighter = syntect::easy::HighlightLines::new(syntax, st_theme);
+        for line in code_lines {
+            let highlighted = highlighter.highlight_line(line, &SYNTAX_SET);
+            match highlighted {
+                Ok(ranges) => {
+                    let mut spans = vec![Span::styled("  ", Style::default().bg(theme.code_bg))];
+                    for (style, text) in ranges {
+                        let fg = style.foreground;
+                        spans.push(Span::styled(
+                            text.to_string(),
+                            Style::default()
+                                .fg(Color::Rgb(fg.r, fg.g, fg.b))
+                                .bg(theme.code_bg),
+                        ));
+                    }
+                    output.push(Line::from(spans));
+                }
+                Err(_) => {
+                    output.push(Line::from(Span::styled(
+                        format!("  {}", line),
+                        Style::default().fg(Color::White).bg(theme.code_bg),
+                    )));
+                }
+            }
+        }
+        if code_lines.is_empty() {
+            output.push(Line::from(Span::styled(
+                "  ",
+                Style::default().bg(theme.code_bg),
+            )));
+        }
+    } else {
+        let code_style = Style::default().fg(Color::White).bg(theme.code_bg);
+        for line in code_lines {
+            output.push(Line::from(Span::styled(format!("  {}", line), code_style)));
+        }
+        if code_lines.is_empty() {
+            output.push(Line::from(Span::styled("  ", code_style)));
+        }
     }
 }
 

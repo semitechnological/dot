@@ -14,6 +14,8 @@ pub struct Config {
     pub mcp: HashMap<String, McpServerConfig>,
     #[serde(default)]
     pub agents: HashMap<String, AgentConfig>,
+    #[serde(default)]
+    pub tui: TuiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +63,18 @@ pub struct AgentConfig {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TuiConfig {
+    #[serde(default = "default_true")]
+    pub vim_mode: bool,
+}
+
+impl Default for TuiConfig {
+    fn default() -> Self {
+        Self { vim_mode: true }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -81,6 +95,7 @@ impl Default for Config {
 
             mcp: HashMap::new(),
             agents: HashMap::new(),
+            tui: TuiConfig::default(),
         }
     }
 }

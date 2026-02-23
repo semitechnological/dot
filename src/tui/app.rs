@@ -7,7 +7,8 @@ use crate::agent::AgentEvent;
 use crate::tui::theme::Theme;
 use crate::tui::tools::{ToolCallDisplay, ToolCategory, extract_tool_detail};
 use crate::tui::widgets::{
-    AgentSelector, CommandPalette, ModelSelector, SessionSelector, ThinkingLevel, ThinkingSelector,
+    AgentSelector, CommandPalette, HelpPopup, ModelSelector, SessionSelector, ThinkingLevel,
+    ThinkingSelector,
 };
 
 pub struct ChatMessage {
@@ -86,9 +87,11 @@ pub struct LayoutRects {
     pub input: Rect,
     pub status: Rect,
     pub model_selector: Option<Rect>,
+    pub agent_selector: Option<Rect>,
     pub command_palette: Option<Rect>,
     pub thinking_selector: Option<Rect>,
     pub session_selector: Option<Rect>,
+    pub help_popup: Option<Rect>,
 }
 
 pub struct App {
@@ -119,6 +122,7 @@ pub struct App {
     pub command_palette: CommandPalette,
     pub thinking_selector: ThinkingSelector,
     pub session_selector: SessionSelector,
+    pub help_popup: HelpPopup,
     pub streaming_started: Option<Instant>,
 
     pub thinking_expanded: bool,
@@ -129,6 +133,7 @@ pub struct App {
     pub paste_blocks: Vec<PasteBlock>,
     pub attachments: Vec<ImageAttachment>,
     pub conversation_title: Option<String>,
+    pub vim_mode: bool,
 }
 
 impl App {
@@ -137,6 +142,7 @@ impl App {
         provider_name: String,
         agent_name: String,
         theme_name: &str,
+        vim_mode: bool,
     ) -> Self {
         Self {
             messages: Vec::new(),
@@ -165,6 +171,7 @@ impl App {
             command_palette: CommandPalette::new(),
             thinking_selector: ThinkingSelector::new(),
             session_selector: SessionSelector::new(),
+            help_popup: HelpPopup::new(),
             streaming_started: None,
             thinking_expanded: false,
             thinking_budget: 0,
@@ -173,6 +180,7 @@ impl App {
             paste_blocks: Vec::new(),
             attachments: Vec::new(),
             conversation_title: None,
+            vim_mode,
         }
     }
 
@@ -516,5 +524,31 @@ impl App {
 
     pub fn move_cursor_end(&mut self) {
         self.cursor_pos = self.input.len();
+    }
+
+    pub fn delete_word_before(&mut self) {
+        if self.cursor_pos == 0 {
+            return;
+        }
+        let before = &self.input[..self.cursor_pos];
+        let trimmed = before.trim_end();
+        let new_end = if trimmed.is_empty() {
+            0
+        } else if let Some(pos) = trimmed.rfind(|c: char| c.is_whitespace()) {
+            pos + trimmed[pos..].chars().next().map(|c| c.len_utf8()).unwrap_or(1)
+        } else {
+            0
+        };
+        self.input.replace_range(new_end..self.cursor_pos, "");
+        self.cursor_pos = new_end;
+    }
+
+    pub fn delete_to_end(&mut self) {
+        self.input.truncate(self.cursor_pos);
+    }
+
+    pub fn delete_to_start(&mut self) {
+        self.input.replace_range(..self.cursor_pos, "");
+        self.cursor_pos = 0;
     }
 }

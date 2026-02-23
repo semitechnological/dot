@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::tui::app::{App, AppMode};
-use crate::tui::widgets::{COMMANDS, ThinkingLevel};
+use crate::tui::widgets::ThinkingLevel;
 
 pub enum InputAction {
     None,
@@ -28,7 +28,10 @@ pub enum InputAction {
 }
 
 pub fn handle_paste(app: &mut App, text: String) -> InputAction {
-    if app.mode != AppMode::Insert || app.is_streaming {
+    if app.vim_mode && app.mode != AppMode::Insert {
+        return InputAction::None;
+    }
+    if app.is_streaming {
         return InputAction::None;
     }
 
@@ -72,6 +75,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
             app.session_selector.close();
             return InputAction::None;
         }
+        if app.help_popup.visible {
+            app.help_popup.close();
+            return InputAction::None;
+        }
         if app.is_streaming {
             return InputAction::CancelStream;
         }
@@ -113,13 +120,24 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         return handle_session_selector(app, key);
     }
 
+    if app.help_popup.visible {
+        if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+            app.help_popup.close();
+        }
+        return InputAction::None;
+    }
+
     if app.command_palette.visible {
         return handle_command_palette(app, key);
     }
 
-    match app.mode {
-        AppMode::Normal => handle_normal(app, key),
-        AppMode::Insert => handle_insert(app, key),
+    if app.vim_mode {
+        match app.mode {
+            AppMode::Normal => handle_normal(app, key),
+            AppMode::Insert => handle_insert(app, key),
+        }
+    } else {
+        handle_simple(app, key)
     }
 }
 
@@ -307,11 +325,7 @@ fn execute_command(app: &mut App, cmd_name: &str) -> InputAction {
             InputAction::None
         }
         "help" => {
-            let help: Vec<String> = COMMANDS
-                .iter()
-                .map(|c| format!("/{} — {}", c.name, c.description))
-                .collect();
-            app.error_message = Some(help.join(" · "));
+            app.help_popup.open();
             InputAction::None
         }
         _ => InputAction::None,
@@ -347,8 +361,31 @@ fn handle_normal(app: &mut App, key: KeyEvent) -> InputAction {
 }
 
 fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('t') {
-        return InputAction::OpenThinkingSelector;
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('t') => return InputAction::OpenThinkingSelector,
+            KeyCode::Char('a') => {
+                app.move_cursor_home();
+                return InputAction::None;
+            }
+            KeyCode::Char('e') => {
+                app.move_cursor_end();
+                return InputAction::None;
+            }
+            KeyCode::Char('w') => {
+                app.delete_word_before();
+                return InputAction::None;
+            }
+            KeyCode::Char('k') => {
+                app.delete_to_end();
+                return InputAction::None;
+            }
+            KeyCode::Char('u') => {
+                app.delete_to_start();
+                return InputAction::None;
+            }
+            _ => {}
+        }
     }
 
     if app.is_streaming {
@@ -363,43 +400,9 @@ fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
             app.mode = AppMode::Normal;
             InputAction::None
         }
-        KeyCode::Enter => {
-            parse_at_references(app);
-            if let Some(msg) = app.take_input() {
-                InputAction::SendMessage(msg)
-            } else {
-                InputAction::None
-            }
-        }
-        KeyCode::Char(c) => {
-            app.insert_char(c);
-            if app.input == "/" {
-                app.command_palette.open(&app.input);
-            } else if app.input.starts_with('/') && app.command_palette.visible {
-                app.command_palette.update_filter(&app.input);
-                if app.command_palette.filtered.is_empty() {
-                    app.command_palette.close();
-                }
-            }
-            InputAction::None
-        }
-        KeyCode::Backspace => {
-            if let Some(pb_idx) = app.paste_block_at_cursor() {
-                app.delete_paste_block(pb_idx);
-            } else {
-                app.delete_char_before();
-            }
-            if app.input.starts_with('/') && !app.input.is_empty() {
-                if !app.command_palette.visible {
-                    app.command_palette.open(&app.input);
-                } else {
-                    app.command_palette.update_filter(&app.input);
-                }
-            } else if app.command_palette.visible {
-                app.command_palette.close();
-            }
-            InputAction::None
-        }
+        KeyCode::Enter => handle_send(app),
+        KeyCode::Char(c) => handle_char_input(app, c),
+        KeyCode::Backspace => handle_backspace(app),
         KeyCode::Left => {
             app.move_cursor_left();
             InputAction::None
@@ -418,6 +421,115 @@ fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
         }
         _ => InputAction::None,
     }
+}
+
+fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('t') => return InputAction::OpenThinkingSelector,
+            KeyCode::Char('a') => {
+                app.move_cursor_home();
+                return InputAction::None;
+            }
+            KeyCode::Char('e') => {
+                app.move_cursor_end();
+                return InputAction::None;
+            }
+            KeyCode::Char('w') => {
+                app.delete_word_before();
+                return InputAction::None;
+            }
+            KeyCode::Char('k') => {
+                app.delete_to_end();
+                return InputAction::None;
+            }
+            KeyCode::Char('u') => {
+                app.delete_to_start();
+                return InputAction::None;
+            }
+            KeyCode::Char('d') => return InputAction::ScrollDown(10),
+            _ => {}
+        }
+    }
+
+    if app.is_streaming {
+        return match key.code {
+            KeyCode::Up => InputAction::ScrollUp(1),
+            KeyCode::Down => InputAction::ScrollDown(1),
+            KeyCode::PageUp => InputAction::ScrollUp(20),
+            KeyCode::PageDown => InputAction::ScrollDown(20),
+            _ => InputAction::None,
+        };
+    }
+
+    match key.code {
+        KeyCode::Esc => InputAction::None,
+        KeyCode::Enter => handle_send(app),
+        KeyCode::Up => InputAction::ScrollUp(1),
+        KeyCode::Down => InputAction::ScrollDown(1),
+        KeyCode::PageUp => InputAction::ScrollUp(20),
+        KeyCode::PageDown => InputAction::ScrollDown(20),
+        KeyCode::Tab => InputAction::OpenAgentSelector,
+        KeyCode::Char(c) => handle_char_input(app, c),
+        KeyCode::Backspace => handle_backspace(app),
+        KeyCode::Left => {
+            app.move_cursor_left();
+            InputAction::None
+        }
+        KeyCode::Right => {
+            app.move_cursor_right();
+            InputAction::None
+        }
+        KeyCode::Home => {
+            app.move_cursor_home();
+            InputAction::None
+        }
+        KeyCode::End => {
+            app.move_cursor_end();
+            InputAction::None
+        }
+        _ => InputAction::None,
+    }
+}
+
+fn handle_send(app: &mut App) -> InputAction {
+    parse_at_references(app);
+    if let Some(msg) = app.take_input() {
+        InputAction::SendMessage(msg)
+    } else {
+        InputAction::None
+    }
+}
+
+fn handle_char_input(app: &mut App, c: char) -> InputAction {
+    app.insert_char(c);
+    if app.input == "/" {
+        app.command_palette.open(&app.input);
+    } else if app.input.starts_with('/') && app.command_palette.visible {
+        app.command_palette.update_filter(&app.input);
+        if app.command_palette.filtered.is_empty() {
+            app.command_palette.close();
+        }
+    }
+    InputAction::None
+}
+
+fn handle_backspace(app: &mut App) -> InputAction {
+    if let Some(pb_idx) = app.paste_block_at_cursor() {
+        app.delete_paste_block(pb_idx);
+    } else {
+        app.delete_char_before();
+    }
+    if app.input.starts_with('/') && !app.input.is_empty() {
+        if !app.command_palette.visible {
+            app.command_palette.open(&app.input);
+        } else {
+            app.command_palette.update_filter(&app.input);
+        }
+    } else if app.command_palette.visible {
+        app.command_palette.close();
+    }
+    InputAction::None
 }
 
 fn rect_contains(r: ratatui::layout::Rect, col: u16, row: u16) -> bool {
@@ -459,8 +571,21 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 return InputAction::None;
             }
 
-            if app.agent_selector.visible {
-                app.agent_selector.close();
+            if app.agent_selector.visible
+                && let Some(popup) = app.layout.agent_selector
+            {
+                if !rect_contains(popup, col, row) {
+                    app.agent_selector.close();
+                }
+                return InputAction::None;
+            }
+
+            if app.help_popup.visible
+                && let Some(popup) = app.layout.help_popup
+            {
+                if !rect_contains(popup, col, row) {
+                    app.help_popup.close();
+                }
                 return InputAction::None;
             }
 
@@ -515,7 +640,9 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
             }
 
             if rect_contains(app.layout.input, col, row) {
-                app.mode = AppMode::Insert;
+                if app.vim_mode {
+                    app.mode = AppMode::Insert;
+                }
                 let inner_x = col.saturating_sub(app.layout.input.x + 3);
                 let inner_y = row.saturating_sub(app.layout.input.y + 1);
                 let target_offset =
@@ -523,7 +650,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 app.cursor_pos = target_offset;
                 InputAction::None
             } else if rect_contains(app.layout.messages, col, row) {
-                if app.mode == AppMode::Insert && app.input.is_empty() {
+                if app.vim_mode && app.mode == AppMode::Insert && app.input.is_empty() {
                     app.mode = AppMode::Normal;
                 }
                 InputAction::None

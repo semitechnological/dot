@@ -177,6 +177,7 @@ pub fn draw_agent_selector(frame: &mut Frame, app: &mut App) {
     let content_height = content_lines.len() + 3;
 
     let popup = centered_popup(frame.area(), content_width, content_height);
+    app.layout.agent_selector = Some(popup);
 
     frame.render_widget(Clear, popup);
 
@@ -202,15 +203,21 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
         return;
     }
 
-    let items: Vec<(&str, &str)> = palette
+    let items: Vec<(&str, &str, &str)> = palette
         .filtered
         .iter()
-        .map(|&i| (COMMANDS[i].name, COMMANDS[i].description))
+        .map(|&i| {
+            (
+                COMMANDS[i].name,
+                COMMANDS[i].description,
+                COMMANDS[i].shortcut,
+            )
+        })
         .collect();
 
     let width = items
         .iter()
-        .map(|(n, d)| n.len() + d.len() + 8)
+        .map(|(n, d, s)| n.len() + d.len() + s.len() + 12)
         .max()
         .unwrap_or(20) as u16;
     let height = items.len() as u16;
@@ -228,10 +235,10 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
     frame.render_widget(Clear, popup);
 
     let mut cmd_lines: Vec<Line<'static>> = Vec::new();
-    for (i, (name, desc)) in items.iter().enumerate() {
+    for (i, (name, desc, shortcut)) in items.iter().enumerate() {
         let is_sel = i == palette.selected;
-        if is_sel {
-            cmd_lines.push(Line::from(vec![
+        let mut spans = if is_sel {
+            vec![
                 Span::styled("\u{25b8} ", Style::default().fg(app.theme.accent)),
                 Span::styled(
                     format!("/{:<10}", name),
@@ -239,15 +246,25 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
                         .fg(app.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(desc.to_string(), Style::default().fg(app.theme.accent)),
-            ]));
+                Span::styled(
+                    format!("{:<24}", desc),
+                    Style::default().fg(app.theme.accent),
+                ),
+            ]
         } else {
-            cmd_lines.push(Line::from(vec![
+            vec![
                 Span::raw("  "),
                 Span::styled(format!("/{:<10}", name), Style::default().fg(Color::Reset)),
-                Span::styled(desc.to_string(), app.theme.dim),
-            ]));
+                Span::styled(format!("{:<24}", desc), app.theme.dim),
+            ]
+        };
+        if !shortcut.is_empty() {
+            spans.push(Span::styled(
+                shortcut.to_string(),
+                Style::default().fg(app.theme.muted_fg),
+            ));
         }
+        cmd_lines.push(Line::from(spans));
     }
 
     frame.render_widget(Paragraph::new(cmd_lines), popup);
@@ -256,8 +273,15 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
 pub fn draw_empty_state(app: &App) -> Vec<Line<'static>> {
     let accent = app.theme.accent;
     let dim = app.theme.dim;
+    let border_style = app.theme.border;
+    let muted = app.theme.muted_fg;
+    let sep_width = 32usize;
+    let sep_line = Line::from(Span::styled(
+        format!("       {}", "\u{2500}".repeat(sep_width)),
+        border_style,
+    ));
+
     vec![
-        Line::from(""),
         Line::from(""),
         Line::from(""),
         Line::from(""),
@@ -271,11 +295,20 @@ pub fn draw_empty_state(app: &App) -> Vec<Line<'static>> {
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::styled("       start a conversation below", dim)),
+        sep_line,
+        Line::from(""),
         Line::from(Span::styled(
-            "       /help \u{00b7} /model \u{00b7} /sessions",
+            "       type a message to get started",
             dim,
         )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("       /help", Style::default().fg(muted)),
+            Span::styled("  \u{00b7}  ", dim),
+            Span::styled("/model", Style::default().fg(muted)),
+            Span::styled("  \u{00b7}  ", dim),
+            Span::styled("/sessions", Style::default().fg(muted)),
+        ]),
         Line::from(""),
     ]
 }
@@ -341,6 +374,110 @@ pub fn draw_thinking_selector(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Clear, popup);
 
     let block = popup_block("thinking", app.theme.accent, app.theme.muted_fg);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let mut all_lines: Vec<Line<'static>> = Vec::new();
+    all_lines.extend(content_lines);
+    all_lines.push(Line::from(""));
+    all_lines.push(Line::from(Span::styled(
+        format!(" {}", footer),
+        app.theme.dim,
+    )));
+
+    frame.render_widget(Paragraph::new(all_lines), inner);
+}
+
+pub fn draw_help_popup(frame: &mut Frame, app: &mut App) {
+    let mut content_lines: Vec<Line<'static>> = Vec::new();
+
+    let heading = Style::default()
+        .fg(app.theme.accent)
+        .add_modifier(Modifier::BOLD);
+    let key_style = Style::default().fg(Color::Reset);
+    let desc_style = app.theme.dim;
+
+    content_lines.push(Line::from(Span::styled(" commands", heading)));
+    content_lines.push(Line::from(""));
+    for c in COMMANDS {
+        let mut spans = vec![
+            Span::styled(format!("   /{:<12}", c.name), key_style),
+            Span::styled(c.description.to_string(), desc_style),
+        ];
+        if !c.shortcut.is_empty() {
+            let pad = 24usize.saturating_sub(c.description.len());
+            spans.push(Span::styled(" ".repeat(pad), desc_style));
+            spans.push(Span::styled(
+                c.shortcut.to_string(),
+                Style::default().fg(app.theme.muted_fg),
+            ));
+        }
+        content_lines.push(Line::from(spans));
+    }
+
+    content_lines.push(Line::from(""));
+    if app.vim_mode {
+        content_lines.push(Line::from(Span::styled(" navigation", heading)));
+        content_lines.push(Line::from(""));
+        for (key, desc) in [
+            ("j/k", "scroll up/down"),
+            ("g/G", "top/bottom"),
+            ("^D/^U", "half-page scroll"),
+            ("i/Esc", "insert/normal mode"),
+            ("t", "toggle thinking"),
+            ("q", "quit"),
+        ] {
+            content_lines.push(Line::from(vec![
+                Span::styled(format!("   {:<14}", key), key_style),
+                Span::styled(desc, desc_style),
+            ]));
+        }
+    } else {
+        content_lines.push(Line::from(Span::styled(" navigation", heading)));
+        content_lines.push(Line::from(""));
+        for (key, desc) in [
+            ("Up/Down", "scroll messages"),
+            ("PgUp/PgDn", "page scroll"),
+            ("^D", "half-page down"),
+        ] {
+            content_lines.push(Line::from(vec![
+                Span::styled(format!("   {:<14}", key), key_style),
+                Span::styled(desc, desc_style),
+            ]));
+        }
+    }
+
+    content_lines.push(Line::from(""));
+    content_lines.push(Line::from(Span::styled(" editing", heading)));
+    content_lines.push(Line::from(""));
+    for (key, desc) in [
+        ("^A/^E", "start/end of line"),
+        ("^W", "delete word"),
+        ("^K/^U", "delete to end/start"),
+        ("^C", "clear input or quit"),
+    ] {
+        content_lines.push(Line::from(vec![
+            Span::styled(format!("   {:<14}", key), key_style),
+            Span::styled(desc, desc_style),
+        ]));
+    }
+
+    let footer = "esc close";
+    let content_width = content_lines
+        .iter()
+        .map(|l| l.width())
+        .max()
+        .unwrap_or(30)
+        .max(footer.len() + 2)
+        + 4;
+    let content_height = content_lines.len() + 3;
+
+    let popup = centered_popup(frame.area(), content_width, content_height);
+    app.layout.help_popup = Some(popup);
+
+    frame.render_widget(Clear, popup);
+
+    let block = popup_block("help", app.theme.accent, app.theme.muted_fg);
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 

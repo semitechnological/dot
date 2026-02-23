@@ -129,7 +129,13 @@ async fn run_app(
         }
     }
 
-    let mut app = App::new(model_name, provider_name, agent_name, &config.theme.name);
+    let mut app = App::new(
+        model_name,
+        provider_name,
+        agent_name,
+        &config.theme.name,
+        config.tui.vim_mode,
+    );
 
     if let Some(ref id) = resume_id {
         let agent_lock = agent.lock().await;
@@ -155,7 +161,7 @@ async fn run_app(
     loop {
         terminal.draw(|f| ui::draw(f, &mut app))?;
 
-        if let Some(ref mut rx) = agent_rx {
+        let event = if let Some(ref mut rx) = agent_rx {
             tokio::select! {
                 biased;
                 agent_event = rx.recv() => {
@@ -172,54 +178,25 @@ async fn run_app(
                             agent_rx = None;
                         }
                     }
+                    continue;
                 }
                 ui_event = events.next() => {
-                    if let Some(ev) = ui_event {
-                        match handle_ui_event(&mut app, &agent, ev).await {
-                            LoopSignal::Quit => break,
-                            LoopSignal::CancelStream => { agent_rx = None; }
-                            LoopSignal::Continue => {}
-                        }
-                    } else {
-                        break;
+                    match ui_event {
+                        Some(ev) => ev,
+                        None => break,
                     }
                 }
             }
         } else {
             match events.next().await {
-                Some(AppEvent::Key(key)) => {
-                    let action = input::handle_key(&mut app, key);
-                    if let LoopSignal::Quit =
-                        dispatch_action(&mut app, &agent, action, &mut agent_rx).await
-                    {
-                        break;
-                    }
-                }
-                Some(AppEvent::Agent(ev)) => {
-                    app.handle_agent_event(ev);
-                }
-                Some(AppEvent::Mouse(mouse)) => {
-                    let action = input::handle_mouse(&mut app, mouse);
-                    if let LoopSignal::Quit =
-                        dispatch_action(&mut app, &agent, action, &mut agent_rx).await
-                    {
-                        break;
-                    }
-                }
-                Some(AppEvent::Paste(text)) => {
-                    let action = input::handle_paste(&mut app, text);
-                    if let LoopSignal::Quit =
-                        dispatch_action(&mut app, &agent, action, &mut agent_rx).await
-                    {
-                        break;
-                    }
-                }
-                Some(AppEvent::Tick) => {
-                    app.tick_count = app.tick_count.wrapping_add(1);
-                }
-                Some(AppEvent::Resize(_, _)) => {}
+                Some(ev) => ev,
                 None => break,
             }
+        };
+
+        match handle_event(&mut app, &agent, event, &mut agent_rx).await {
+            LoopSignal::Quit => break,
+            _ => {}
         }
     }
 
@@ -399,156 +376,25 @@ async fn dispatch_action(
     LoopSignal::Continue
 }
 
-async fn handle_ui_event(app: &mut App, agent: &Arc<Mutex<Agent>>, event: AppEvent) -> LoopSignal {
-    match event {
-        AppEvent::Key(key) => {
-            let action = input::handle_key(app, key);
-            match action {
-                InputAction::Quit => return LoopSignal::Quit,
-                InputAction::CancelStream => {
-                    app.is_streaming = false;
-                    app.streaming_started = None;
-                    app.current_response.clear();
-                    app.current_thinking.clear();
-                    app.current_tool_calls.clear();
-                    app.pending_tool_name = None;
-                    app.error_message = Some("cancelled".to_string());
-                    return LoopSignal::CancelStream;
-                }
-                InputAction::NewConversation => {
-                    let mut agent_lock = agent.lock().await;
-                    match agent_lock.new_conversation() {
-                        Ok(()) => app.clear_conversation(),
-                        Err(e) => {
-                            app.error_message =
-                                Some(format!("failed to start new conversation: {e}"))
-                        }
-                    }
-                }
-                InputAction::OpenModelSelector => {
-                    let agent_lock = agent.lock().await;
-                    let grouped = agent_lock.fetch_all_models().await;
-                    let current_provider = agent_lock.current_provider_name().to_string();
-                    let current_model = agent_lock.current_model().to_string();
-                    drop(agent_lock);
-                    app.model_selector
-                        .open(grouped, &current_provider, &current_model);
-                }
-                InputAction::OpenAgentSelector => {
-                    let agent_lock = agent.lock().await;
-                    let entries: Vec<AgentEntry> = agent_lock
-                        .agent_profiles()
-                        .iter()
-                        .map(|p| AgentEntry {
-                            name: p.name.clone(),
-                            description: p.description.clone(),
-                        })
-                        .collect();
-                    let current = agent_lock.current_agent_name().to_string();
-                    drop(agent_lock);
-                    app.agent_selector.open(entries, &current);
-                }
-                InputAction::OpenSessionSelector => {
-                    let agent_lock = agent.lock().await;
-                    let sessions = agent_lock.list_sessions().unwrap_or_default();
-                    drop(agent_lock);
-                    let entries: Vec<SessionEntry> = sessions
-                        .into_iter()
-                        .map(|s| SessionEntry {
-                            id: s.id.clone(),
-                            title: s
-                                .title
-                                .unwrap_or_else(|| format!("{}…", &s.id[..8.min(s.id.len())])),
-                            subtitle: format!("{} · {}", time_ago(&s.updated_at), s.provider),
-                        })
-                        .collect();
-                    app.session_selector.open(entries);
-                }
-                InputAction::ResumeSession { id } => {
-                    let mut agent_lock = agent.lock().await;
-                    match agent_lock.get_session(&id) {
-                        Ok(conv) => {
-                            let title = conv.title.clone();
-                            let messages_for_ui: Vec<(String, String)> = conv
-                                .messages
-                                .iter()
-                                .map(|m| (m.role.clone(), m.content.clone()))
-                                .collect();
-                            match agent_lock.resume_conversation(&conv) {
-                                Ok(()) => {
-                                    drop(agent_lock);
-                                    app.clear_conversation();
-                                    app.conversation_title = title;
-                                    for (role, content) in messages_for_ui {
-                                        app.messages.push(ChatMessage {
-                                            role,
-                                            content,
-                                            tool_calls: Vec::new(),
-                                            thinking: None,
-                                            model: None,
-                                        });
-                                    }
-                                    app.scroll_to_bottom();
-                                }
-                                Err(e) => {
-                                    drop(agent_lock);
-                                    app.error_message =
-                                        Some(format!("failed to resume session: {e}"));
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            drop(agent_lock);
-                            app.error_message = Some(format!("session not found: {e}"));
-                        }
-                    }
-                }
-                InputAction::SelectModel { provider, model } => {
-                    let mut agent_lock = agent.lock().await;
-                    agent_lock.set_active_provider(&provider, &model);
-                }
-                InputAction::SelectAgent { name } => {
-                    let mut agent_lock = agent.lock().await;
-                    agent_lock.switch_agent(&name);
-                    app.model_name = agent_lock.current_model().to_string();
-                    app.provider_name = agent_lock.current_provider_name().to_string();
-                }
-                InputAction::ScrollUp(n) => app.scroll_up(n),
-                InputAction::ScrollDown(n) => app.scroll_down(n),
-                InputAction::ScrollToTop => app.scroll_to_top(),
-                InputAction::ScrollToBottom => app.scroll_to_bottom(),
-                InputAction::ClearConversation => app.clear_conversation(),
-                InputAction::ToggleThinking => {
-                    app.thinking_expanded = !app.thinking_expanded;
-                }
-                InputAction::OpenThinkingSelector => {
-                    let level = app.thinking_level();
-                    app.thinking_selector.open(level);
-                }
-                InputAction::SetThinkingLevel(budget) => {
-                    let mut agent_lock = agent.lock().await;
-                    agent_lock.set_thinking_budget(budget);
-                }
-                InputAction::SendMessage(_) => {}
-                InputAction::None => {}
-            }
-        }
-        AppEvent::Mouse(mouse) => {
-            let action = input::handle_mouse(app, mouse);
-            match action {
-                InputAction::ScrollUp(n) => app.scroll_up(n),
-                InputAction::ScrollDown(n) => app.scroll_down(n),
-                _ => {}
-            }
-        }
-        AppEvent::Paste(text) => {
-            input::handle_paste(app, text);
-        }
+async fn handle_event(
+    app: &mut App,
+    agent: &Arc<Mutex<Agent>>,
+    event: AppEvent,
+    agent_rx: &mut Option<mpsc::UnboundedReceiver<crate::agent::AgentEvent>>,
+) -> LoopSignal {
+    let action = match event {
+        AppEvent::Key(key) => input::handle_key(app, key),
+        AppEvent::Mouse(mouse) => input::handle_mouse(app, mouse),
+        AppEvent::Paste(text) => input::handle_paste(app, text),
         AppEvent::Tick => {
             app.tick_count = app.tick_count.wrapping_add(1);
+            return LoopSignal::Continue;
         }
-        AppEvent::Agent(ev) => app.handle_agent_event(ev),
-        AppEvent::Resize(_, _) => {}
-    }
-    LoopSignal::Continue
+        AppEvent::Agent(ev) => {
+            app.handle_agent_event(ev);
+            return LoopSignal::Continue;
+        }
+        AppEvent::Resize(_, _) => return LoopSignal::Continue,
+    };
+    dispatch_action(app, agent, action, agent_rx).await
 }

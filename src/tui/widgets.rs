@@ -180,6 +180,7 @@ pub struct SlashCommand {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
     pub description: &'static str,
+    pub shortcut: &'static str,
 }
 
 pub const COMMANDS: &[SlashCommand] = &[
@@ -187,36 +188,43 @@ pub const COMMANDS: &[SlashCommand] = &[
         name: "model",
         aliases: &["m"],
         description: "switch model",
+        shortcut: "",
     },
     SlashCommand {
         name: "agent",
         aliases: &["a"],
         description: "switch agent profile",
+        shortcut: "Tab",
     },
     SlashCommand {
         name: "clear",
         aliases: &["cl"],
         description: "clear conversation",
+        shortcut: "",
     },
     SlashCommand {
         name: "help",
         aliases: &["h"],
         description: "show commands",
+        shortcut: "",
     },
     SlashCommand {
         name: "thinking",
         aliases: &["t", "think"],
         description: "set thinking level",
+        shortcut: "^T",
     },
     SlashCommand {
         name: "sessions",
         aliases: &["s", "sess"],
         description: "resume a previous session",
+        shortcut: "",
     },
     SlashCommand {
         name: "new",
         aliases: &["n"],
         description: "start new conversation",
+        shortcut: "",
     },
 ];
 
@@ -487,6 +495,30 @@ impl SessionSelector {
         } else {
             None
         }
+    }
+}
+
+pub struct HelpPopup {
+    pub visible: bool,
+}
+
+impl Default for HelpPopup {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HelpPopup {
+    pub fn new() -> Self {
+        Self { visible: false }
+    }
+
+    pub fn open(&mut self) {
+        self.visible = true;
+    }
+
+    pub fn close(&mut self) {
+        self.visible = false;
     }
 }
 

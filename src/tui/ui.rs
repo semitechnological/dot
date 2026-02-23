@@ -6,8 +6,9 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use crate::tui::app::{App, AppMode};
+use crate::tui::app::{App, AppMode, ChatMessage};
 use crate::tui::markdown;
+use crate::tui::theme::Theme;
 use crate::tui::ui_popups;
 use crate::tui::ui_tools;
 
@@ -52,6 +53,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.session_selector.visible {
         ui_popups::draw_session_selector(frame, app);
     }
+
+    if app.help_popup.visible {
+        ui_popups::draw_help_popup(frame, app);
+    }
 }
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
@@ -93,21 +98,23 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    right_spans.push(Span::raw(" "));
-    right_spans.push(match app.mode {
-        AppMode::Normal => Span::styled(
-            " NORMAL ",
-            Style::default()
-                .fg(app.theme.mode_normal_fg)
-                .bg(app.theme.mode_normal_bg),
-        ),
-        AppMode::Insert => Span::styled(
-            " INSERT ",
-            Style::default()
-                .fg(app.theme.mode_insert_fg)
-                .bg(app.theme.mode_insert_bg),
-        ),
-    });
+    if app.vim_mode {
+        right_spans.push(Span::raw(" "));
+        right_spans.push(match app.mode {
+            AppMode::Normal => Span::styled(
+                " NORMAL ",
+                Style::default()
+                    .fg(app.theme.mode_normal_fg)
+                    .bg(app.theme.mode_normal_bg),
+            ),
+            AppMode::Insert => Span::styled(
+                " INSERT ",
+                Style::default()
+                    .fg(app.theme.mode_insert_fg)
+                    .bg(app.theme.mode_insert_bg),
+            ),
+        });
+    }
 
     if let Some(elapsed) = app.streaming_elapsed_secs() {
         right_spans.push(Span::styled(
@@ -138,59 +145,13 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut all_lines: Vec<Line<'static>> = Vec::new();
 
     for msg in &app.messages {
-        all_lines.push(Line::from(""));
-
-        if msg.role == "user" {
-            let mut content_lines = msg.content.lines();
-            if let Some(first) = content_lines.next() {
-                all_lines.push(Line::from(vec![
-                    Span::styled("  \u{25cf} ", Style::default().fg(app.theme.muted_fg)),
-                    Span::styled(first.to_string(), app.theme.user_text),
-                ]));
-            }
-            for text_line in content_lines {
-                all_lines.push(Line::from(Span::styled(
-                    format!("    {}", text_line),
-                    app.theme.user_text,
-                )));
-            }
-        } else if msg.role == "compact" {
-            all_lines.push(Line::from(vec![
-                Span::styled("  ", app.theme.thinking),
-                Span::styled(msg.content.clone(), app.theme.dim),
-            ]));
-        } else {
-            let model_label = msg
-                .model
-                .as_deref()
-                .map(|m| shorten_model(m))
-                .unwrap_or_default();
-            if model_label.is_empty() {
-                all_lines.push(Line::from(Span::styled(
-                    "  \u{25c6}",
-                    Style::default().fg(app.theme.accent),
-                )));
-            } else {
-                all_lines.push(Line::from(vec![
-                    Span::styled(
-                        "  \u{25c6} ",
-                        Style::default().fg(app.theme.accent),
-                    ),
-                    Span::styled(model_label, app.theme.dim),
-                ]));
-            }
-            if let Some(ref thinking) = msg.thinking {
-                render_thinking_block(thinking, app.thinking_expanded, &app.theme, &mut all_lines);
-            }
-            let md_lines =
-                markdown::render_markdown(&msg.content, &app.theme, inner.width.saturating_sub(4));
-            for line in md_lines {
-                let mut padded = vec![Span::raw("    ")];
-                padded.extend(line.spans);
-                all_lines.push(Line::from(padded));
-            }
-            ui_tools::render_tool_calls(&msg.tool_calls, &app.theme, &mut all_lines);
-        }
+        render_message(
+            msg,
+            &app.theme,
+            app.thinking_expanded,
+            inner.width,
+            &mut all_lines,
+        );
     }
 
     if app.is_streaming {
@@ -249,7 +210,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         };
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .track_symbol(Some("\u{2502}"))
-            .thumb_symbol("\u{2588}")
+            .thumb_symbol("\u{2503}")
             .begin_symbol(None)
             .end_symbol(None)
             .track_style(app.theme.scrollbar_track)
@@ -258,6 +219,71 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         let mut state =
             ScrollbarState::new(app.max_scroll as usize).position(app.scroll_offset as usize);
         frame.render_stateful_widget(scrollbar, scrollbar_area, &mut state);
+    }
+}
+
+fn render_message(
+    msg: &ChatMessage,
+    theme: &Theme,
+    thinking_expanded: bool,
+    inner_width: u16,
+    lines: &mut Vec<Line<'static>>,
+) {
+    lines.push(Line::from(""));
+
+    match msg.role.as_str() {
+        "user" => {
+            let mut content_lines = msg.content.lines();
+            if let Some(first) = content_lines.next() {
+                lines.push(Line::from(vec![
+                    Span::styled("  \u{25cf} ", Style::default().fg(theme.muted_fg)),
+                    Span::styled(first.to_string(), theme.user_text),
+                ]));
+            }
+            for text_line in content_lines {
+                lines.push(Line::from(Span::styled(
+                    format!("    {}", text_line),
+                    theme.user_text,
+                )));
+            }
+        }
+        "compact" => {
+            for text_line in msg.content.lines() {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", theme.thinking),
+                    Span::styled(text_line.to_string(), theme.dim),
+                ]));
+            }
+        }
+        _ => {
+            let model_label = msg
+                .model
+                .as_deref()
+                .map(shorten_model)
+                .unwrap_or_default();
+            if model_label.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  \u{25c6}",
+                    Style::default().fg(theme.accent),
+                )));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled("  \u{25c6} ", Style::default().fg(theme.accent)),
+                    Span::styled(model_label, theme.dim),
+                ]));
+            }
+            if let Some(ref thinking) = msg.thinking {
+                render_thinking_block(thinking, thinking_expanded, theme, lines);
+            }
+            let md_lines =
+                markdown::render_markdown(&msg.content, theme, inner_width.saturating_sub(4));
+            for line in md_lines {
+                let mut padded = vec![Span::raw("    ")];
+                padded.extend(line.spans);
+                lines.push(Line::from(padded));
+            }
+            ui_tools::render_tool_calls(&msg.tool_calls, theme, lines);
+        }
     }
 }
 
@@ -312,7 +338,7 @@ fn render_thinking_block(
 }
 
 fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
-    let is_active = app.mode == AppMode::Insert && !app.is_streaming;
+    let is_active = (!app.vim_mode || app.mode == AppMode::Insert) && !app.is_streaming;
 
     let border_style = if is_active {
         Style::default().fg(app.theme.accent)
@@ -465,6 +491,13 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
+    if !app.follow_bottom && app.is_streaming {
+        left_spans.push(Span::styled(
+            " \u{2193} new content",
+            Style::default().fg(app.theme.accent),
+        ));
+    }
+
     let left_width: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
 
     let scroll_indicator = if app.max_scroll > 0 {
@@ -481,12 +514,16 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     let hint = if app.model_selector.visible
         || app.agent_selector.visible
         || app.thinking_selector.visible
+        || app.session_selector.visible
+        || app.help_popup.visible
     {
         "\u{2191}\u{2193} enter esc "
-    } else if app.mode == AppMode::Insert {
-        "/help "
-    } else {
+    } else if app.is_streaming {
+        "^C cancel "
+    } else if app.vim_mode && app.mode == AppMode::Normal {
         "i j/k q "
+    } else {
+        "? help "
     };
 
     let right_width = scroll_indicator.len() + hint.len();

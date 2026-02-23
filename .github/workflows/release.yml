@@ -88,29 +88,42 @@ jobs:
           
           ESCAPED_DIFF=$(echo "$DIFF" | jq -Rs .)
           
-          REQUEST=$(jq -n \
-            --arg diff "Generate release notes for version $VERSION of dot (a CLI tool for managing dotfiles and config).\n\nCode diff:\n$DIFF" \
-            '{
-              "model": "gpt-5.2",
-              "messages": [
-                {
-                  "role": "system", 
-                  "content": "You generate release notes from code diffs. Rules:\n- No emojis\n- No title/header (release name already shown in GitHub UI)\n- Minimal, concise, yet comprehensive\n- Only include sections with actual changes (omit empty sections entirely)\n- Use markdown ## headers: Features, Fixes, Improvements, Breaking Changes\n- Focus on user-facing changes only, skip internal refactoring\n- If only version bump with no real changes, output exactly: Maintenance release."
-                },
-                {
-                  "role": "user",
-                  "content": $diff
-                }
-              ],
-              "max_completion_tokens": 2000
-            }')
-          
-          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $OPENAI_API_KEY" \
-            -d "$REQUEST")
-          
-          NOTES=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY secret is not set, skipping AI generation"
+            NOTES=""
+          else
+            REQUEST=$(jq -n \
+              --arg diff "Generate release notes for version $VERSION of dot-ai (a minimal terminal-based AI coding agent with tool execution, MCP support, and persistent conversations).\n\nCode diff:\n$DIFF" \
+              '{
+                "model": "gpt-5.2",
+                "messages": [
+                  {
+                    "role": "system", 
+                    "content": "You generate release notes from code diffs. Rules:\n- No emojis\n- No title/header (release name already shown in GitHub UI)\n- Minimal, concise, yet comprehensive\n- Only include sections with actual changes (omit empty sections entirely)\n- Use markdown ## headers: Features, Fixes, Improvements, Breaking Changes\n- Focus on user-facing changes only, skip internal refactoring\n- If only version bump with no real changes, output exactly: Maintenance release."
+                  },
+                  {
+                    "role": "user",
+                    "content": $diff
+                  }
+                ],
+                "max_completion_tokens": 2000
+              }')
+            
+            RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" https://api.openai.com/v1/chat/completions \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $OPENAI_API_KEY" \
+              -d "$REQUEST")
+            
+            HTTP_STATUS=$(echo "$RESPONSE" | tail -1 | sed 's/HTTP_STATUS://')
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            
+            if [ "$HTTP_STATUS" != "200" ]; then
+              echo "OpenAI API returned HTTP $HTTP_STATUS"
+              echo "$BODY" | jq '.error' 2>/dev/null || true
+            fi
+            
+            NOTES=$(echo "$BODY" | jq -r '.choices[0].message.content // empty')
+          fi
           
           if [ -z "$NOTES" ]; then
             echo "API call failed or empty response, using fallback"

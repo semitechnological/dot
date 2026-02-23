@@ -293,16 +293,26 @@ async fn dispatch_action(
         }
         InputAction::OpenSessionSelector => {
             let agent_lock = agent.lock().await;
+            let current_id = agent_lock.conversation_id().to_string();
             let sessions = agent_lock.list_sessions().unwrap_or_default();
             drop(agent_lock);
             let entries: Vec<SessionEntry> = sessions
                 .into_iter()
-                .map(|s| SessionEntry {
-                    id: s.id.clone(),
-                    title: s
-                        .title
-                        .unwrap_or_else(|| format!("{}…", &s.id[..8.min(s.id.len())])),
-                    subtitle: format!("{} · {}", time_ago(&s.updated_at), s.provider),
+                .map(|s| {
+                    let title = if let Some(t) = &s.title {
+                        t.clone()
+                    } else if s.id == current_id {
+                        app.conversation_title
+                            .clone()
+                            .unwrap_or_else(|| "new conversation".to_string())
+                    } else {
+                        "untitled".to_string()
+                    };
+                    SessionEntry {
+                        id: s.id.clone(),
+                        title,
+                        subtitle: format!("{} · {}", time_ago(&s.updated_at), s.provider),
+                    }
                 })
                 .collect();
             app.session_selector.open(entries);

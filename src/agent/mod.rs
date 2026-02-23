@@ -146,6 +146,9 @@ impl Agent {
         }
     }
     pub fn new_conversation(&mut self) -> Result<()> {
+        if self.messages.is_empty() {
+            let _ = self.db.delete_conversation(&self.conversation_id);
+        }
         let conversation_id = self.db.create_conversation(
             self.provider().model(),
             self.provider().name(),

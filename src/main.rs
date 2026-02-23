@@ -19,28 +19,26 @@ async fn main() -> Result<()> {
             dot::auth::login_flow().await?;
         }
         Some(dot::cli::Commands::Config) => {
+            let cfg = dot::config::Config::load()?;
             let config_path = dot::config::Config::config_path();
             let data_dir = dot::config::Config::data_dir();
             let creds_path = dot::config::Config::config_dir().join("credentials.json");
             println!("config   {}", config_path.display());
             println!("data     {}", data_dir.display());
             println!("creds    {}", creds_path.display());
-            if config_path.exists() {
-                let cfg = dot::config::Config::load()?;
-                println!("provider {}", cfg.default_provider);
-                println!("model    {}", cfg.default_model);
-                if !cfg.mcp.is_empty() {
-                    println!("\nmcp servers:");
-                    for (name, mcfg) in &cfg.mcp {
-                        let status = if mcfg.enabled { "on" } else { "off" };
-                        println!("  {} [{}] {:?}", name, status, mcfg.command);
-                    }
+            println!("provider {}", cfg.default_provider);
+            println!("model    {}", cfg.default_model);
+            if !cfg.mcp.is_empty() {
+                println!("\nmcp servers:");
+                for (name, mcfg) in &cfg.mcp {
+                    let status = if mcfg.enabled { "on" } else { "off" };
+                    println!("  {} [{}] {:?}", name, status, mcfg.command);
                 }
-                if !cfg.agents.is_empty() {
-                    println!("\nagents:");
-                    for (name, acfg) in &cfg.agents {
-                        println!("  {} — {}", name, acfg.description);
-                    }
+            }
+            if !cfg.agents.is_empty() {
+                println!("\nagents:");
+                for (name, acfg) in &cfg.agents {
+                    println!("  {} — {}", name, acfg.description);
                 }
             }
         }

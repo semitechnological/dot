@@ -7,8 +7,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 fn db_path() -> Result<PathBuf> {
-    let data_dir = dirs::data_local_dir().context("Could not determine local data directory")?;
-    let dot_dir = data_dir.join("dot");
+    let dot_dir = crate::config::Config::data_dir();
     std::fs::create_dir_all(&dot_dir).context("Could not create dot data directory")?;
     Ok(dot_dir.join("dot.db"))
 }

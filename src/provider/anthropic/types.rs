@@ -23,6 +23,14 @@ fn convert_content_block(block: &ContentBlock) -> serde_json::Value {
             "type": "text",
             "text": text,
         }),
+        ContentBlock::Image { media_type, data } => serde_json::json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": data,
+            },
+        }),
         ContentBlock::ToolUse { id, name, input } => serde_json::json!({
             "type": "tool_use",
             "id": id,

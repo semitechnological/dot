@@ -7,6 +7,7 @@ use crate::agent::AgentEvent;
 pub enum AppEvent {
     Key(crossterm::event::KeyEvent),
     Mouse(crossterm::event::MouseEvent),
+    Paste(String),
     Tick,
     Agent(AgentEvent),
     Resize(u16, u16),
@@ -31,7 +32,7 @@ impl EventHandler {
 
         let task = tokio::spawn(async move {
             let mut reader = EventStream::new();
-            let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
+            let mut tick = tokio::time::interval(std::time::Duration::from_millis(16));
 
             loop {
                 tokio::select! {
@@ -54,6 +55,11 @@ impl EventHandler {
                                 if dominated
                                     && event_tx.send(AppEvent::Mouse(mouse)).is_err()
                                 {
+                                    return;
+                                }
+                            }
+                            Some(Ok(CEvent::Paste(text))) => {
+                                if event_tx.send(AppEvent::Paste(text)).is_err() {
                                     return;
                                 }
                             }

@@ -77,6 +77,12 @@ pub struct Theme {
     pub mode_normal_bg: Color,
     pub mode_insert_fg: Color,
     pub mode_insert_bg: Color,
+    pub cost: Style,
+    pub user_text: Style,
+    pub tool_action: Style,
+    pub separator: Style,
+    pub tool_exit_ok: Style,
+    pub tool_exit_err: Style,
 }
 
 impl Theme {
@@ -148,6 +154,12 @@ impl Theme {
             mode_normal_bg: muted,
             mode_insert_fg: base,
             mode_insert_bg: accent,
+            cost: Style::default().fg(Color::Rgb(180, 150, 90)),
+            user_text: Style::default().fg(Color::Rgb(205, 214, 244)),
+            tool_action: Style::default().fg(muted),
+            separator: Style::default().fg(Color::Rgb(60, 62, 80)),
+            tool_exit_ok: Style::default().fg(green),
+            tool_exit_err: Style::default().fg(red),
         }
     }
 
@@ -207,6 +219,12 @@ impl Theme {
             mode_normal_bg: muted,
             mode_insert_fg: Color::White,
             mode_insert_bg: accent,
+            cost: Style::default().fg(Color::Rgb(160, 120, 40)),
+            user_text: Style::default().fg(text),
+            tool_action: Style::default().fg(muted),
+            separator: Style::default().fg(surface),
+            tool_exit_ok: Style::default().fg(green),
+            tool_exit_err: Style::default().fg(red),
         }
     }
 }

@@ -51,10 +51,10 @@ impl SkillRegistry {
     fn search_paths() -> Vec<PathBuf> {
         let mut paths = Vec::new();
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let config_dir = dirs::config_dir().unwrap_or_else(|| home.join(".config"));
+        let config_dir = crate::config::Config::config_dir();
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-        paths.push(config_dir.join("dot").join("skills"));
+        paths.push(config_dir.join("skills"));
         paths.push(home.join(".agents").join("skills"));
         paths.push(home.join(".claude").join("skills"));
 

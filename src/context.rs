@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::config::ContextConfig;
 
@@ -11,9 +11,7 @@ impl AgentsContext {
         let mut parts: Vec<String> = Vec::new();
 
         if cfg.auto_load_global {
-            let config_dir = dirs::config_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("dot");
+            let config_dir = crate::config::Config::config_dir();
             for name in &["AGENTS.md", "AGENT.md"] {
                 let path = config_dir.join(name);
                 if path.exists() {

@@ -87,6 +87,17 @@ impl Default for Config {
 
 impl Config {
     pub fn config_dir() -> PathBuf {
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            if !xdg.is_empty() {
+                return PathBuf::from(xdg).join("dot");
+            }
+        }
+        #[cfg(unix)]
+        return dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".config")
+            .join("dot");
+        #[cfg(not(unix))]
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("dot")
@@ -97,6 +108,18 @@ impl Config {
     }
 
     pub fn data_dir() -> PathBuf {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+            if !xdg.is_empty() {
+                return PathBuf::from(xdg).join("dot");
+            }
+        }
+        #[cfg(unix)]
+        return dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".local")
+            .join("share")
+            .join("dot");
+        #[cfg(not(unix))]
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("dot")
@@ -113,7 +136,9 @@ impl Config {
                 .with_context(|| format!("reading config from {}", path.display()))?;
             toml::from_str(&content).context("parsing config.toml")
         } else {
-            Ok(Self::default())
+            let config = Self::default();
+            config.save()?;
+            Ok(config)
         }
     }
 

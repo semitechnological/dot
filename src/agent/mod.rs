@@ -270,14 +270,29 @@ impl Agent {
         content: &str,
         event_tx: UnboundedSender<AgentEvent>,
     ) -> Result<()> {
+        self.send_message_with_images(content, Vec::new(), event_tx)
+            .await
+    }
+
+    pub async fn send_message_with_images(
+        &mut self,
+        content: &str,
+        images: Vec<(String, String)>,
+        event_tx: UnboundedSender<AgentEvent>,
+    ) -> Result<()> {
         if self.should_compact() {
             self.compact(&event_tx).await?;
         }
         self.db
             .add_message(&self.conversation_id, "user", content)?;
+        let mut blocks: Vec<ContentBlock> = Vec::new();
+        for (media_type, data) in images {
+            blocks.push(ContentBlock::Image { media_type, data });
+        }
+        blocks.push(ContentBlock::Text(content.to_string()));
         self.messages.push(Message {
             role: Role::User,
-            content: vec![ContentBlock::Text(content.to_string())],
+            content: blocks,
         });
         if self.messages.len() == 1 {
             let title: String = content.chars().take(60).collect();

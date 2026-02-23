@@ -27,6 +27,29 @@ pub enum InputAction {
     ToggleThinking,
 }
 
+pub fn handle_paste(app: &mut App, text: String) -> InputAction {
+    if app.mode != AppMode::Insert || app.is_streaming {
+        return InputAction::None;
+    }
+
+    let trimmed = text.trim_end_matches('\n').to_string();
+    if trimmed.is_empty() {
+        return InputAction::None;
+    }
+
+    if crate::tui::app::is_image_path(trimmed.trim()) {
+        let path = trimmed.trim().trim_matches('"').trim_matches('\'');
+        match app.add_image_attachment(path) {
+            Ok(()) => {}
+            Err(e) => app.error_message = Some(e),
+        }
+        return InputAction::None;
+    }
+
+    app.handle_paste(trimmed);
+    InputAction::None
+}
+
 pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         if app.model_selector.visible {
@@ -52,9 +75,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
         if app.is_streaming {
             return InputAction::CancelStream;
         }
-        if !app.input.is_empty() {
+        if !app.input.is_empty() || !app.attachments.is_empty() {
             app.input.clear();
             app.cursor_pos = 0;
+            app.paste_blocks.clear();
+            app.attachments.clear();
             return InputAction::None;
         }
         return InputAction::Quit;
@@ -339,6 +364,7 @@ fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
             InputAction::None
         }
         KeyCode::Enter => {
+            parse_at_references(app);
             if let Some(msg) = app.take_input() {
                 InputAction::SendMessage(msg)
             } else {
@@ -358,7 +384,11 @@ fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
             InputAction::None
         }
         KeyCode::Backspace => {
-            app.delete_char_before();
+            if let Some(pb_idx) = app.paste_block_at_cursor() {
+                app.delete_paste_block(pb_idx);
+            } else {
+                app.delete_char_before();
+            }
             if app.input.starts_with('/') && !app.input.is_empty() {
                 if !app.command_palette.visible {
                     app.command_palette.open(&app.input);
@@ -502,6 +532,23 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
             }
         }
         _ => InputAction::None,
+    }
+}
+
+fn parse_at_references(app: &mut App) {
+    let words: Vec<String> = app.input.split_whitespace().map(String::from).collect();
+    for word in &words {
+        if let Some(path) = word.strip_prefix('@')
+            && !path.is_empty()
+            && crate::tui::app::is_image_path(path)
+        {
+            match app.add_image_attachment(path) {
+                Ok(()) => {}
+                Err(e) => {
+                    app.error_message = Some(e);
+                }
+            }
+        }
     }
 }
 

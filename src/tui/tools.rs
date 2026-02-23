@@ -48,14 +48,14 @@ impl ToolCategory {
 
     pub fn label(&self) -> String {
         match self {
-            Self::FileRead => "Read".to_string(),
-            Self::FileWrite => "Write".to_string(),
-            Self::Directory => "List".to_string(),
-            Self::Search => "Search".to_string(),
-            Self::Command => "Run".to_string(),
-            Self::Mcp { server } => format!("MCP:{}", server),
-            Self::Skill => "Skill".to_string(),
-            Self::Unknown => "Tool".to_string(),
+            Self::FileRead => "read".to_string(),
+            Self::FileWrite => "write".to_string(),
+            Self::Directory => "list".to_string(),
+            Self::Search => "search".to_string(),
+            Self::Command => "run".to_string(),
+            Self::Mcp { server } => format!("mcp:{}", server),
+            Self::Skill => "skill".to_string(),
+            Self::Unknown => "tool".to_string(),
         }
     }
 }

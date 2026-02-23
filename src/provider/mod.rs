@@ -24,6 +24,10 @@ pub enum Role {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     Text(String),
+    Image {
+        media_type: String,
+        data: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -95,6 +99,9 @@ pub trait Provider: Send + Sync {
     fn model(&self) -> &str;
     fn set_model(&mut self, model: String);
     fn available_models(&self) -> Vec<String>;
+    fn supports_vision(&self) -> bool {
+        true
+    }
     fn fetch_models(
         &self,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<String>>> + Send + '_>>;

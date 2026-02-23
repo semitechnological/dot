@@ -45,7 +45,8 @@ pub async fn run(
     execute!(
         stdout,
         terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
+        crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableBracketedPaste
     )?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend)?;
@@ -66,7 +67,8 @@ pub async fn run(
     execute!(
         std::io::stderr(),
         terminal::LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
+        crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableBracketedPaste
     )?;
     terminal.show_cursor()?;
 
@@ -132,12 +134,14 @@ async fn run_app(
     if let Some(ref id) = resume_id {
         let agent_lock = agent.lock().await;
         if let Ok(conv) = agent_lock.get_session(id) {
+            app.conversation_title = conv.title.clone();
             for m in &conv.messages {
                 app.messages.push(ChatMessage {
                     role: m.role.clone(),
                     content: m.content.clone(),
                     tool_calls: Vec::new(),
                     thinking: None,
+                    model: None,
                 });
             }
             app.scroll_to_bottom();
@@ -202,6 +206,14 @@ async fn run_app(
                         break;
                     }
                 }
+                Some(AppEvent::Paste(text)) => {
+                    let action = input::handle_paste(&mut app, text);
+                    if let LoopSignal::Quit =
+                        dispatch_action(&mut app, &agent, action, &mut agent_rx).await
+                    {
+                        break;
+                    }
+                }
                 Some(AppEvent::Tick) => {
                     app.tick_count = app.tick_count.wrapping_add(1);
                 }
@@ -248,13 +260,24 @@ async fn dispatch_action(
             return LoopSignal::CancelStream;
         }
         InputAction::SendMessage(msg) => {
+            let images: Vec<(String, String)> = app
+                .take_attachments()
+                .into_iter()
+                .map(|a| (a.media_type, a.data))
+                .collect();
+
             let (tx, rx) = mpsc::unbounded_channel();
             *agent_rx = Some(rx);
 
             let agent_clone = Arc::clone(agent);
             tokio::spawn(async move {
                 let mut agent = agent_clone.lock().await;
-                if let Err(e) = agent.send_message(&msg, tx).await {
+                let result = if images.is_empty() {
+                    agent.send_message(&msg, tx).await
+                } else {
+                    agent.send_message_with_images(&msg, images, tx).await
+                };
+                if let Err(e) = result {
                     tracing::error!("Agent send_message error: {}", e);
                 }
             });
@@ -311,6 +334,7 @@ async fn dispatch_action(
             let mut agent_lock = agent.lock().await;
             match agent_lock.get_session(&id) {
                 Ok(conv) => {
+                    let title = conv.title.clone();
                     let messages_for_ui: Vec<(String, String)> = conv
                         .messages
                         .iter()
@@ -320,12 +344,14 @@ async fn dispatch_action(
                         Ok(()) => {
                             drop(agent_lock);
                             app.clear_conversation();
+                            app.conversation_title = title;
                             for (role, content) in messages_for_ui {
                                 app.messages.push(ChatMessage {
                                     role,
                                     content,
                                     tool_calls: Vec::new(),
                                     thinking: None,
+                                    model: None,
                                 });
                             }
                             app.scroll_to_bottom();
@@ -442,6 +468,7 @@ async fn handle_ui_event(app: &mut App, agent: &Arc<Mutex<Agent>>, event: AppEve
                     let mut agent_lock = agent.lock().await;
                     match agent_lock.get_session(&id) {
                         Ok(conv) => {
+                            let title = conv.title.clone();
                             let messages_for_ui: Vec<(String, String)> = conv
                                 .messages
                                 .iter()
@@ -451,12 +478,14 @@ async fn handle_ui_event(app: &mut App, agent: &Arc<Mutex<Agent>>, event: AppEve
                                 Ok(()) => {
                                     drop(agent_lock);
                                     app.clear_conversation();
+                                    app.conversation_title = title;
                                     for (role, content) in messages_for_ui {
                                         app.messages.push(ChatMessage {
                                             role,
                                             content,
                                             tool_calls: Vec::new(),
                                             thinking: None,
+                                            model: None,
                                         });
                                     }
                                     app.scroll_to_bottom();
@@ -511,6 +540,9 @@ async fn handle_ui_event(app: &mut App, agent: &Arc<Mutex<Agent>>, event: AppEve
                 InputAction::ScrollDown(n) => app.scroll_down(n),
                 _ => {}
             }
+        }
+        AppEvent::Paste(text) => {
+            input::handle_paste(app, text);
         }
         AppEvent::Tick => {
             app.tick_count = app.tick_count.wrapping_add(1);

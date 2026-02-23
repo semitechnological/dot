@@ -12,12 +12,13 @@ use crate::tui::ui_popups;
 use crate::tui::ui_tools;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    let input_height = app.input_height();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Min(1),
-            Constraint::Length(5),
+            Constraint::Length(input_height),
             Constraint::Length(1),
         ])
         .split(frame.area());
@@ -54,7 +55,46 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 }
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
-    let mode_indicator = match app.mode {
+    let sep = Span::styled(" \u{00b7} ", app.theme.separator);
+
+    let title_text = app
+        .conversation_title
+        .as_deref()
+        .unwrap_or("new conversation");
+
+    let mut left_spans = vec![Span::styled(
+        format!(" {}", title_text),
+        Style::default().fg(app.theme.accent),
+    )];
+
+    let show_agent = !app.agent_name.is_empty()
+        && app.agent_name != "default"
+        && app.agent_name != "dot";
+    if show_agent {
+        left_spans.push(sep.clone());
+        left_spans.push(Span::styled(
+            format!("@{}", app.agent_name),
+            app.theme.status_bar,
+        ));
+    }
+
+    let left_width: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
+
+    let model_short = shorten_model(&app.model_name);
+    let mut right_spans: Vec<Span<'static>> = Vec::new();
+
+    right_spans.push(Span::styled(model_short, app.theme.dim));
+
+    if app.thinking_budget > 0 {
+        right_spans.push(sep.clone());
+        right_spans.push(Span::styled(
+            format!("\u{25c7}{}", app.thinking_level().label()),
+            app.theme.thinking,
+        ));
+    }
+
+    right_spans.push(Span::raw(" "));
+    right_spans.push(match app.mode {
         AppMode::Normal => Span::styled(
             " NORMAL ",
             Style::default()
@@ -67,47 +107,21 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
                 .fg(app.theme.mode_insert_fg)
                 .bg(app.theme.mode_insert_bg),
         ),
-    };
+    });
 
-    let sep = Span::styled(" \u{2502} ", app.theme.border);
-
-    let model_short = shorten_model(&app.model_name);
-    let model_display = format!("{}/{}", app.provider_name, model_short);
-
-    let mut spans = vec![
-        Span::styled(
-            " dot ",
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        sep.clone(),
-        Span::styled(model_display, app.theme.status_bar),
-    ];
-
-    if app.agent_name != "default" && !app.agent_name.is_empty() {
-        spans.push(sep.clone());
-        spans.push(Span::styled(
-            format!("@{}", app.agent_name),
-            Style::default().fg(app.theme.accent),
-        ));
-    }
-
-    if app.thinking_budget > 0 {
-        spans.push(sep.clone());
-        spans.push(Span::styled(
-            format!("\u{25c7} think:{}", app.thinking_level().label()),
+    if let Some(elapsed) = app.streaming_elapsed_secs() {
+        right_spans.push(Span::styled(
+            format!(" {}", format_elapsed(elapsed)),
             app.theme.thinking,
         ));
     }
 
-    spans.push(Span::raw("  "));
-    spans.push(mode_indicator);
+    let right_width: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
+    let gap = (area.width as usize).saturating_sub(left_width + right_width + 1);
 
-    if let Some(elapsed) = app.streaming_elapsed_secs() {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(format_elapsed(elapsed), app.theme.thinking));
-    }
+    let mut spans = left_spans;
+    spans.push(Span::raw(" ".repeat(gap)));
+    spans.extend(right_spans);
 
     let header = Line::from(spans);
     frame.render_widget(Paragraph::new(header), area);
@@ -127,12 +141,18 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         all_lines.push(Line::from(""));
 
         if msg.role == "user" {
-            all_lines.push(Line::from(vec![
-                Span::styled("  \u{25cf} ", Style::default().fg(app.theme.muted_fg)),
-                Span::styled("You", app.theme.user_label),
-            ]));
-            for text_line in msg.content.lines() {
-                all_lines.push(Line::from(Span::raw(format!("    {}", text_line))));
+            let mut content_lines = msg.content.lines();
+            if let Some(first) = content_lines.next() {
+                all_lines.push(Line::from(vec![
+                    Span::styled("  \u{25cf} ", Style::default().fg(app.theme.muted_fg)),
+                    Span::styled(first.to_string(), app.theme.user_text),
+                ]));
+            }
+            for text_line in content_lines {
+                all_lines.push(Line::from(Span::styled(
+                    format!("    {}", text_line),
+                    app.theme.user_text,
+                )));
             }
         } else if msg.role == "compact" {
             all_lines.push(Line::from(vec![
@@ -140,10 +160,25 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(msg.content.clone(), app.theme.dim),
             ]));
         } else {
-            all_lines.push(Line::from(vec![
-                Span::styled("  \u{25c6} ", Style::default().fg(app.theme.accent)),
-                Span::styled("Assistant", app.theme.assistant_label),
-            ]));
+            let model_label = msg
+                .model
+                .as_deref()
+                .map(|m| shorten_model(m))
+                .unwrap_or_default();
+            if model_label.is_empty() {
+                all_lines.push(Line::from(Span::styled(
+                    "  \u{25c6}",
+                    Style::default().fg(app.theme.accent),
+                )));
+            } else {
+                all_lines.push(Line::from(vec![
+                    Span::styled(
+                        "  \u{25c6} ",
+                        Style::default().fg(app.theme.accent),
+                    ),
+                    Span::styled(model_label, app.theme.dim),
+                ]));
+            }
             if let Some(ref thinking) = msg.thinking {
                 render_thinking_block(thinking, app.thinking_expanded, &app.theme, &mut all_lines);
             }
@@ -232,42 +267,54 @@ fn render_thinking_block(
     theme: &crate::tui::theme::Theme,
     lines: &mut Vec<Line<'static>>,
 ) {
+    let word_count = thinking.split_whitespace().count();
     if expanded {
         lines.push(Line::from(vec![
-            Span::styled("    \u{25bd} ", theme.thinking),
-            Span::styled("thinking", theme.thinking),
+            Span::styled("    \u{25be} ", theme.thinking),
             Span::styled(
-                " \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
-                theme.thinking,
+                "thinking",
+                Style::default()
+                    .fg(theme.muted_fg)
+                    .add_modifier(Modifier::ITALIC),
             ),
+            Span::styled(format!(" \u{00b7} {}w", word_count), theme.dim),
         ]));
         for text_line in thinking.lines() {
             lines.push(Line::from(vec![
                 Span::styled("    \u{2502} ", theme.thinking),
-                Span::styled(text_line.to_string(), theme.dim),
+                Span::styled(
+                    text_line.to_string(),
+                    Style::default()
+                        .fg(theme.muted_fg)
+                        .add_modifier(Modifier::ITALIC),
+                ),
             ]));
         }
-        lines.push(Line::from(Span::styled(
-            "    \u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
-            theme.thinking,
-        )));
+        lines.push(Line::from(Span::styled("    ", theme.thinking)));
     } else {
-        let token_hint = if thinking.len() > 100 {
-            format!(" (~{}w)", thinking.split_whitespace().count())
+        let hint = if word_count > 10 {
+            format!(" \u{00b7} {}w", word_count)
         } else {
             String::new()
         };
         lines.push(Line::from(vec![
-            Span::styled("    \u{25b6} ", theme.thinking),
-            Span::styled("thinking", theme.thinking),
-            Span::styled(token_hint, theme.dim),
+            Span::styled("    \u{25b8} ", theme.thinking),
+            Span::styled(
+                "thinking",
+                Style::default()
+                    .fg(theme.muted_fg)
+                    .add_modifier(Modifier::ITALIC),
+            ),
+            Span::styled(hint, theme.dim),
             Span::styled("  [t]", theme.dim),
         ]));
     }
 }
 
 fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
-    let border_style = if app.mode == AppMode::Insert && !app.is_streaming {
+    let is_active = app.mode == AppMode::Insert && !app.is_streaming;
+
+    let border_style = if is_active {
         Style::default().fg(app.theme.accent)
     } else {
         app.theme.border
@@ -279,43 +326,91 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
     let inner = block.inner(area);
 
+    let (prompt, prompt_style) = if is_active {
+        (
+            "\u{25c6} ",
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        ("\u{25c7} ", Style::default().fg(app.theme.muted_fg))
+    };
+
     let display_lines: Vec<Line<'static>> = if app.is_streaming {
-        let spinner = ["\u{25dc}", "\u{25dd}", "\u{25de}", "\u{25df}"];
-        let idx = (app.tick_count / 2 % spinner.len() as u64) as usize;
+        let pulse = ["\u{25c7}", "\u{25c6}"];
+        let idx = (app.tick_count / 20 % pulse.len() as u64) as usize;
+
+        let dot_count = ((app.tick_count / 16) % 4) as usize;
+        let dots: String = ".".repeat(dot_count);
 
         let mut spans = vec![
-            Span::styled(format!("  {} ", spinner[idx]), app.theme.dim),
-            Span::styled("generating response", app.theme.dim),
+            Span::styled(
+                format!("  {} ", pulse[idx]),
+                Style::default().fg(app.theme.accent),
+            ),
+            Span::styled(format!("generating{:<3}", dots), app.theme.dim),
         ];
         if let Some(elapsed) = app.streaming_elapsed_secs() {
             spans.push(Span::styled(
-                format!(" {}", format_elapsed(elapsed)),
+                format!(" \u{00b7} {}", format_elapsed(elapsed)),
                 app.theme.dim,
             ));
         }
         vec![Line::from(spans)]
-    } else if app.input.is_empty() {
+    } else if app.input.is_empty() && app.attachments.is_empty() {
         vec![Line::from(vec![
-            Span::styled("\u{276f} ", app.theme.input_prompt),
-            Span::styled("message  /model  /sessions  /new  /help", app.theme.dim),
+            Span::styled(prompt, prompt_style),
+            Span::styled("message or /help", app.theme.dim),
         ])]
     } else {
         let mut lines = Vec::new();
-        for (i, line) in app.input.lines().enumerate() {
-            if i == 0 {
+        if !app.attachments.is_empty() {
+            let att_display: Vec<String> = app
+                .attachments
+                .iter()
+                .map(|a| {
+                    std::path::Path::new(&a.path)
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_else(|| a.path.clone())
+                })
+                .collect();
+            lines.push(Line::from(vec![
+                Span::styled(prompt, prompt_style),
+                Span::styled(
+                    format!("\u{1f4ce} {}", att_display.join(", ")),
+                    app.theme.dim,
+                ),
+            ]));
+        }
+
+        let display = app.display_input();
+        if display.is_empty() && !app.attachments.is_empty() {
+            if lines.is_empty() {
                 lines.push(Line::from(vec![
-                    Span::styled("\u{276f} ", app.theme.input_prompt),
-                    Span::raw(line.to_string()),
-                ]));
-            } else {
-                lines.push(Line::from(vec![
-                    Span::raw("  "),
-                    Span::raw(line.to_string()),
+                    Span::styled(prompt, prompt_style),
+                    Span::styled("add a message or press enter", app.theme.dim),
                 ]));
             }
-        }
-        if app.input.ends_with('\n') {
-            lines.push(Line::from(Span::raw("  ")));
+        } else {
+            let offset = if app.attachments.is_empty() { 0 } else { 1 };
+            for (i, line) in display.lines().enumerate() {
+                if i == 0 && offset == 0 {
+                    lines.push(Line::from(vec![
+                        Span::styled(prompt, prompt_style),
+                        Span::raw(line.to_string()),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::raw(line.to_string()),
+                    ]));
+                }
+            }
+            if display.ends_with('\n') {
+                lines.push(Line::from(Span::raw("  ")));
+            }
         }
         lines
     };
@@ -325,10 +420,13 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(block, area);
     frame.render_widget(paragraph, inner);
 
-    if app.mode == AppMode::Insert && !app.is_streaming && !app.model_selector.visible {
-        let (cx, cy) = cursor_position(&app.input, app.cursor_pos, inner);
-        if cy < inner.y + inner.height {
-            frame.set_cursor_position((cx, cy));
+    if is_active && !app.model_selector.visible {
+        let blink_on = (app.tick_count / 32) % 2 == 0;
+        if blink_on {
+            let (cx, cy) = cursor_position(&app.input, app.cursor_pos, inner);
+            if cy < inner.y + inner.height {
+                frame.set_cursor_position((cx, cy));
+            }
         }
     }
 }
@@ -351,11 +449,23 @@ fn cursor_position(input: &str, byte_pos: usize, area: Rect) -> (u16, u16) {
 }
 
 fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
-    let left = format!(
-        " \u{25b8} {}in \u{00b7} {}out",
-        format_tokens(app.usage.input_tokens),
-        format_tokens(app.usage.output_tokens),
-    );
+    let mut left_spans: Vec<Span<'static>> = vec![Span::styled(
+        format!(
+            " {}in \u{00b7} {}out",
+            format_tokens(app.usage.input_tokens),
+            format_tokens(app.usage.output_tokens),
+        ),
+        app.theme.status_bar,
+    )];
+
+    if app.usage.total_cost > 0.0 {
+        left_spans.push(Span::styled(
+            format!(" \u{00b7} ${:.2}", app.usage.total_cost),
+            app.theme.cost,
+        ));
+    }
+
+    let left_width: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
 
     let scroll_indicator = if app.max_scroll > 0 {
         let pct = if app.max_scroll == 0 {
@@ -363,34 +473,31 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             (app.scroll_offset as u32 * 100 / app.max_scroll as u32).min(100)
         };
-        format!(" {}% ", pct)
+        format!("{}% ", pct)
     } else {
         String::new()
     };
 
-    let right = if app.model_selector.visible
+    let hint = if app.model_selector.visible
         || app.agent_selector.visible
         || app.thinking_selector.visible
     {
-        "\u{2191}\u{2193} select \u{00b7} enter confirm \u{00b7} esc cancel "
+        "\u{2191}\u{2193} enter esc "
     } else if app.mode == AppMode::Insert {
-        "/model \u{00b7} ctrl+t thinking \u{00b7} esc normal \u{00b7} ctrl+c quit "
+        "/help "
     } else {
-        "i insert \u{00b7} j/k scroll \u{00b7} t thinking \u{00b7} tab agents \u{00b7} q quit "
+        "i j/k q "
     };
 
-    let padding = area
-        .width
-        .saturating_sub(left.len() as u16 + scroll_indicator.len() as u16 + right.len() as u16);
+    let right_width = scroll_indicator.len() + hint.len();
+    let padding = (area.width as usize).saturating_sub(left_width + right_width);
 
-    let line = Line::from(vec![
-        Span::styled(left, app.theme.status_bar),
-        Span::styled(scroll_indicator, app.theme.dim),
-        Span::raw(" ".repeat(padding as usize)),
-        Span::styled(right.to_string(), app.theme.status_bar),
-    ]);
+    let mut line_spans = left_spans;
+    line_spans.push(Span::raw(" ".repeat(padding)));
+    line_spans.push(Span::styled(scroll_indicator, app.theme.dim));
+    line_spans.push(Span::styled(hint.to_string(), app.theme.dim));
 
-    frame.render_widget(Paragraph::new(line), area);
+    frame.render_widget(Paragraph::new(Line::from(line_spans)), area);
 }
 
 pub fn format_elapsed(secs: f64) -> String {
@@ -405,7 +512,7 @@ pub fn format_elapsed(secs: f64) -> String {
     }
 }
 
-fn shorten_model(model: &str) -> String {
+pub fn shorten_model(model: &str) -> String {
     if model.len() <= 30 {
         return model.to_string();
     }

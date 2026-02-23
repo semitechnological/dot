@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Instant;
 
 use ratatui::layout::Rect;
@@ -14,6 +15,7 @@ pub struct ChatMessage {
     pub content: String,
     pub tool_calls: Vec<ToolCallDisplay>,
     pub thinking: Option<String>,
+    pub model: Option<String>,
 }
 
 pub struct TokenUsage {
@@ -31,6 +33,45 @@ impl Default for TokenUsage {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct PasteBlock {
+    pub start: usize,
+    pub end: usize,
+    pub line_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImageAttachment {
+    pub path: String,
+    pub media_type: String,
+    pub data: String,
+}
+
+const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"];
+
+pub fn media_type_for_path(path: &str) -> Option<String> {
+    let ext = Path::new(path).extension()?.to_str()?.to_lowercase();
+    match ext.as_str() {
+        "png" => Some("image/png".into()),
+        "jpg" | "jpeg" => Some("image/jpeg".into()),
+        "gif" => Some("image/gif".into()),
+        "webp" => Some("image/webp".into()),
+        "bmp" => Some("image/bmp".into()),
+        "svg" => Some("image/svg+xml".into()),
+        _ => None,
+    }
+}
+
+pub fn is_image_path(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| IMAGE_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+pub const PASTE_COLLAPSE_THRESHOLD: usize = 5;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum AppMode {
@@ -84,6 +125,10 @@ pub struct App {
     pub thinking_budget: u32,
     pub last_escape_time: Option<Instant>,
     pub follow_bottom: bool,
+
+    pub paste_blocks: Vec<PasteBlock>,
+    pub attachments: Vec<ImageAttachment>,
+    pub conversation_title: Option<String>,
 }
 
 impl App {
@@ -125,6 +170,9 @@ impl App {
             thinking_budget: 0,
             last_escape_time: None,
             follow_bottom: true,
+            paste_blocks: Vec::new(),
+            attachments: Vec::new(),
+            conversation_title: None,
         }
     }
 
@@ -162,6 +210,7 @@ impl App {
                         content,
                         tool_calls: std::mem::take(&mut self.current_tool_calls),
                         thinking,
+                        model: Some(self.model_name.clone()),
                     });
                 }
                 self.current_response.clear();
@@ -214,6 +263,7 @@ impl App {
                     content: "\u{26a1} compacting context\u{2026}".to_string(),
                     tool_calls: Vec::new(),
                     thinking: None,
+                    model: None,
                 });
             }
             AgentEvent::Compacted { messages_removed } => {
@@ -231,17 +281,41 @@ impl App {
 
     pub fn take_input(&mut self) -> Option<String> {
         let trimmed = self.input.trim().to_string();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() && self.attachments.is_empty() {
             return None;
         }
+        let display = if self.attachments.is_empty() {
+            trimmed.clone()
+        } else {
+            let att_names: Vec<String> = self
+                .attachments
+                .iter()
+                .map(|a| {
+                    Path::new(&a.path)
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_else(|| a.path.clone())
+                })
+                .collect();
+            if trimmed.is_empty() {
+                format!("[{}]", att_names.join(", "))
+            } else {
+                format!("{} [{}]", trimmed, att_names.join(", "))
+            }
+        };
         self.messages.push(ChatMessage {
             role: "user".to_string(),
-            content: trimmed.clone(),
+            content: display,
             tool_calls: Vec::new(),
             thinking: None,
+            model: None,
         });
+        if self.conversation_title.is_none() {
+            self.conversation_title = Some(trimmed.chars().take(60).collect());
+        }
         self.input.clear();
         self.cursor_pos = 0;
+        self.paste_blocks.clear();
         self.is_streaming = true;
         self.streaming_started = Some(Instant::now());
         self.current_response.clear();
@@ -250,6 +324,114 @@ impl App {
         self.error_message = None;
         self.scroll_to_bottom();
         Some(trimmed)
+    }
+
+    pub fn take_attachments(&mut self) -> Vec<ImageAttachment> {
+        std::mem::take(&mut self.attachments)
+    }
+
+    pub fn input_height(&self) -> u16 {
+        if self.is_streaming {
+            return 3;
+        }
+        let lines = if self.input.is_empty() {
+            1
+        } else {
+            self.input.lines().count() + if self.input.ends_with('\n') { 1 } else { 0 }
+        };
+        (lines as u16 + 1).clamp(3, 12)
+    }
+
+    pub fn handle_paste(&mut self, text: String) {
+        let line_count = text.lines().count();
+        if line_count >= PASTE_COLLAPSE_THRESHOLD {
+            let start = self.cursor_pos;
+            self.input.insert_str(self.cursor_pos, &text);
+            let end = start + text.len();
+            self.cursor_pos = end;
+            self.paste_blocks.push(PasteBlock {
+                start,
+                end,
+                line_count,
+            });
+        } else {
+            self.input.insert_str(self.cursor_pos, &text);
+            self.cursor_pos += text.len();
+        }
+    }
+
+    pub fn paste_block_at_cursor(&self) -> Option<usize> {
+        self.paste_blocks
+            .iter()
+            .position(|pb| self.cursor_pos > pb.start && self.cursor_pos <= pb.end)
+    }
+
+    pub fn delete_paste_block(&mut self, idx: usize) {
+        let pb = self.paste_blocks.remove(idx);
+        let len = pb.end - pb.start;
+        self.input.replace_range(pb.start..pb.end, "");
+        self.cursor_pos = pb.start;
+        for remaining in &mut self.paste_blocks {
+            if remaining.start >= pb.end {
+                remaining.start -= len;
+                remaining.end -= len;
+            }
+        }
+    }
+
+    pub fn add_image_attachment(&mut self, path: &str) -> Result<(), String> {
+        let resolved = if path.starts_with('~') {
+            if let Ok(home) = std::env::var("HOME") {
+                path.replacen('~', &home, 1)
+            } else {
+                path.to_string()
+            }
+        } else {
+            path.to_string()
+        };
+
+        let fs_path = Path::new(&resolved);
+        if !fs_path.exists() {
+            return Err(format!("file not found: {}", path));
+        }
+
+        let media_type = media_type_for_path(&resolved)
+            .ok_or_else(|| format!("unsupported image format: {}", path))?;
+
+        let data = std::fs::read(fs_path).map_err(|e| format!("failed to read {}: {}", path, e))?;
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+
+        if self.attachments.iter().any(|a| a.path == resolved) {
+            return Ok(());
+        }
+
+        self.attachments.push(ImageAttachment {
+            path: resolved,
+            media_type,
+            data: encoded,
+        });
+        Ok(())
+    }
+
+    pub fn display_input(&self) -> String {
+        if self.paste_blocks.is_empty() {
+            return self.input.clone();
+        }
+        let mut result = String::new();
+        let mut pos = 0;
+        let mut sorted_blocks: Vec<&PasteBlock> = self.paste_blocks.iter().collect();
+        sorted_blocks.sort_by_key(|pb| pb.start);
+        for pb in sorted_blocks {
+            if pb.start > pos {
+                result.push_str(&self.input[pos..pb.start]);
+            }
+            result.push_str(&format!("[pasted {} lines]", pb.line_count));
+            pos = pb.end;
+        }
+        if pos < self.input.len() {
+            result.push_str(&self.input[pos..]);
+        }
+        result
     }
 
     pub fn scroll_up(&mut self, n: u16) {
@@ -284,6 +466,9 @@ impl App {
         self.follow_bottom = true;
         self.usage = TokenUsage::default();
         self.error_message = None;
+        self.paste_blocks.clear();
+        self.attachments.clear();
+        self.conversation_title = None;
     }
 
     pub fn insert_char(&mut self, c: char) {

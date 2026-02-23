@@ -12,8 +12,6 @@ pub fn render_tool_calls(
     lines: &mut Vec<Line<'static>>,
 ) {
     for tc in tool_calls {
-        lines.push(Line::from(""));
-
         let (status_icon, status_style) = if tc.is_error {
             ("\u{2717}", theme.error)
         } else {
@@ -25,7 +23,7 @@ pub fn render_tool_calls(
 
         let mut header_spans = vec![
             Span::styled(format!("    {} ", status_icon), status_style),
-            Span::styled(format!("{} ", label), cat_style),
+            Span::styled(format!("{:<6}", label), cat_style),
         ];
 
         if !tc.detail.is_empty() {
@@ -77,10 +75,10 @@ pub fn render_tool_calls(
 
             if show_output && !output.is_empty() {
                 let max_lines = if tc.is_error { 6 } else { 4 };
-                let max_chars = 300;
+                let max_chars = 400;
                 let preview: String = output.chars().take(max_chars).collect();
                 let trimmed = if output.len() > max_chars {
-                    format!("{}...", preview)
+                    format!("{}\u{2026}", preview)
                 } else {
                     preview
                 };
@@ -93,7 +91,7 @@ pub fn render_tool_calls(
 
                 for ol in trimmed.lines().take(max_lines) {
                     lines.push(Line::from(Span::styled(
-                        format!("      {}", ol),
+                        format!("          {}", ol),
                         output_style,
                     )));
                 }
@@ -101,7 +99,7 @@ pub fn render_tool_calls(
                 if total_lines_in_output > max_lines || output.len() > max_chars {
                     lines.push(Line::from(Span::styled(
                         format!(
-                            "      \u{2026} {} more lines",
+                            "          \u{2026} {} more lines",
                             output.lines().count().saturating_sub(max_lines)
                         ),
                         theme.dim,
@@ -117,22 +115,22 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
     let has_tool = app.pending_tool_name.is_some();
     let has_completed_tools = !app.current_tool_calls.is_empty();
 
+    let model_label = super::ui::shorten_model(&app.model_name);
+    let model_header = vec![
+        Span::styled("  \u{25c6} ", Style::default().fg(app.theme.accent)),
+        Span::styled(model_label, app.theme.dim),
+    ];
+
     if has_completed_tools && !has_text {
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("  \u{25c6} ", Style::default().fg(app.theme.accent)),
-            Span::styled("Assistant", app.theme.assistant_label),
-        ]));
+        lines.push(Line::from(model_header.clone()));
         render_tool_calls(&app.current_tool_calls, &app.theme, lines);
     }
 
     if has_text {
         if !has_completed_tools {
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("  \u{25c6} ", Style::default().fg(app.theme.accent)),
-                Span::styled("Assistant", app.theme.assistant_label),
-            ]));
+            lines.push(Line::from(model_header.clone()));
         }
 
         if has_completed_tools {
@@ -147,34 +145,34 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
             padded.extend(line.spans);
             lines.push(Line::from(padded));
         }
-        let cursor_frames = ["\u{2588}", "\u{2589}", "\u{258a}", "\u{258b}"];
-        let idx = (app.tick_count / 2 % cursor_frames.len() as u64) as usize;
-        lines.push(Line::from(Span::styled(
-            format!("    {}", cursor_frames[idx]),
-            Style::default().fg(app.theme.accent),
-        )));
+        let blink = (app.tick_count / 32) % 2 == 0;
+        if blink {
+            lines.push(Line::from(Span::styled(
+                "    \u{258d}",
+                Style::default().fg(app.theme.accent),
+            )));
+        } else {
+            lines.push(Line::from(Span::raw("    ")));
+        }
     } else if has_tool {
         if !has_completed_tools {
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("  \u{25c6} ", Style::default().fg(app.theme.accent)),
-                Span::styled("Assistant", app.theme.assistant_label),
-            ]));
+            lines.push(Line::from(model_header.clone()));
         }
 
         let tool_name = app.pending_tool_name.as_deref().unwrap_or("");
         let category = ToolCategory::from_name(tool_name);
         let detail = extract_tool_detail(tool_name, &app.pending_tool_input);
 
-        let spinner = ["\u{25dc}", "\u{25dd}", "\u{25de}", "\u{25df}"];
-        let idx = (app.tick_count / 2 % spinner.len() as u64) as usize;
+        let dots = ["\u{00b7}", "\u{2022}", "\u{25cf}", "\u{2022}"];
+        let idx = (app.tick_count / 10 % dots.len() as u64) as usize;
 
         let cat_style = tool_category_style(&category, &app.theme);
         let label = category.label();
 
         let mut tool_spans = vec![
-            Span::styled(format!("    {} ", spinner[idx]), cat_style),
-            Span::styled(format!("{} ", label), cat_style),
+            Span::styled(format!("    {} ", dots[idx]), cat_style),
+            Span::styled(format!("{:<6}", label), cat_style),
         ];
 
         if !detail.is_empty() {
@@ -203,26 +201,29 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
 
         if let Some(elapsed) = app.streaming_elapsed_secs() {
             tool_spans.push(Span::styled(
-                format!(" {}", super::ui::format_elapsed(elapsed)),
-                app.theme.thinking,
+                format!(" \u{00b7} {}", super::ui::format_elapsed(elapsed)),
+                app.theme.dim,
             ));
         }
 
         lines.push(Line::from(tool_spans));
     } else if !has_completed_tools {
         lines.push(Line::from(""));
-        let braille = [
-            "\u{2840}", "\u{2844}", "\u{2846}", "\u{2847}", "\u{2843}", "\u{2841}",
-        ];
-        let idx = (app.tick_count / 2 % braille.len() as u64) as usize;
+        let dots = ["\u{00b7}", "\u{2022}", "\u{25cf}", "\u{2022}"];
+        let idx = (app.tick_count / 10 % dots.len() as u64) as usize;
         let has_live_thinking = !app.current_thinking.is_empty();
         let mut thinking_spans = vec![
-            Span::styled(format!("    {} ", braille[idx]), app.theme.thinking),
-            Span::styled("thinking", app.theme.thinking),
+            Span::styled(format!("    {} ", dots[idx]), app.theme.thinking),
+            Span::styled(
+                "thinking",
+                ratatui::style::Style::default()
+                    .fg(app.theme.muted_fg)
+                    .add_modifier(ratatui::style::Modifier::ITALIC),
+            ),
         ];
         if let Some(elapsed) = app.streaming_elapsed_secs() {
             thinking_spans.push(Span::styled(
-                format!(" {}", super::ui::format_elapsed(elapsed)),
+                format!(" \u{00b7} {}", super::ui::format_elapsed(elapsed)),
                 app.theme.dim,
             ));
         }
@@ -236,7 +237,12 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
             for text_line in thinking.lines() {
                 lines.push(Line::from(vec![
                     Span::styled("    \u{2502} ", app.theme.thinking),
-                    Span::styled(text_line.to_string(), app.theme.dim),
+                    Span::styled(
+                        text_line.to_string(),
+                        ratatui::style::Style::default()
+                            .fg(app.theme.muted_fg)
+                            .add_modifier(ratatui::style::Modifier::ITALIC),
+                    ),
                 ]));
             }
         }

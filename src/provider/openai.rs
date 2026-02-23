@@ -7,11 +7,12 @@ use async_openai::{
     types::{
         ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage,
         ChatCompletionRequestAssistantMessageContent, ChatCompletionRequestMessage,
+        ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestMessageContentPartText,
         ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageContent,
         ChatCompletionRequestToolMessage, ChatCompletionRequestToolMessageContent,
         ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent,
-        ChatCompletionTool, ChatCompletionToolType, CreateChatCompletionRequest, FinishReason,
-        FunctionCall, FunctionObject,
+        ChatCompletionRequestUserMessageContentPart, ChatCompletionTool, ChatCompletionToolType,
+        CreateChatCompletionRequest, FinishReason, FunctionCall, FunctionObject, ImageUrl,
     },
 };
 use futures::StreamExt;
@@ -84,10 +85,14 @@ fn convert_messages(
             Role::User => {
                 let mut tool_results: Vec<(String, String)> = Vec::new();
                 let mut texts: Vec<String> = Vec::new();
+                let mut images: Vec<(String, String)> = Vec::new();
 
                 for block in &msg.content {
                     match block {
                         ContentBlock::Text(t) => texts.push(t.clone()),
+                        ContentBlock::Image { media_type, data } => {
+                            images.push((media_type.clone(), data.clone()));
+                        }
                         ContentBlock::ToolResult {
                             tool_use_id,
                             content,
@@ -108,7 +113,32 @@ fn convert_messages(
                     ));
                 }
 
-                if !texts.is_empty() {
+                if !images.is_empty() {
+                    let mut parts: Vec<ChatCompletionRequestUserMessageContentPart> = Vec::new();
+                    if !texts.is_empty() {
+                        parts.push(ChatCompletionRequestUserMessageContentPart::Text(
+                            ChatCompletionRequestMessageContentPartText {
+                                text: texts.join("\n"),
+                            },
+                        ));
+                    }
+                    for (media_type, data) in images {
+                        parts.push(ChatCompletionRequestUserMessageContentPart::ImageUrl(
+                            ChatCompletionRequestMessageContentPartImage {
+                                image_url: ImageUrl {
+                                    url: format!("data:{};base64,{}", media_type, data),
+                                    detail: None,
+                                },
+                            },
+                        ));
+                    }
+                    result.push(ChatCompletionRequestMessage::User(
+                        ChatCompletionRequestUserMessage {
+                            content: ChatCompletionRequestUserMessageContent::Array(parts),
+                            name: None,
+                        },
+                    ));
+                } else if !texts.is_empty() {
                     result.push(ChatCompletionRequestMessage::User(
                         ChatCompletionRequestUserMessage {
                             content: ChatCompletionRequestUserMessageContent::Text(

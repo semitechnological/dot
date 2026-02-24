@@ -354,15 +354,26 @@ fn render_message(
 
     match msg.role.as_str() {
         "user" => {
-            let (bullet, cont) = if compact {
-                (" \u{25cf} ", "   ")
+            let (marker, cont) = if compact {
+                (" \u{203a} ", "   ")
             } else {
-                ("  \u{25cf} ", "    ")
+                ("  \u{203a} ", "    ")
             };
             let mut content_lines = msg.content.lines();
             if let Some(first) = content_lines.next() {
                 lines.push(Line::from(vec![
-                    Span::styled(bullet, Style::default().fg(theme.muted_fg)),
+                    Span::styled(
+                        marker,
+                        Style::default()
+                            .fg(theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "you ",
+                        Style::default()
+                            .fg(theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(first.to_string(), theme.user_text),
                 ]));
             }

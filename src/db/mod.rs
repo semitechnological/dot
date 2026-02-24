@@ -358,4 +358,25 @@ impl Db {
         }
         Ok(calls)
     }
+
+    pub fn get_user_message_history(&self, limit: usize) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT content FROM messages WHERE role = 'user' \
+                 ORDER BY created_at DESC LIMIT ?1",
+            )
+            .context("Failed to prepare user history query")?;
+
+        let rows = stmt
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .context("Failed to query user history")?;
+
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row.context("Failed to read history row")?);
+        }
+        messages.reverse();
+        Ok(messages)
+    }
 }

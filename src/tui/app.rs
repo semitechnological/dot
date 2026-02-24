@@ -219,6 +219,9 @@ pub struct App {
     pub pending_question: Option<PendingQuestion>,
     pub pending_permission: Option<PendingPermission>,
     pub message_queue: VecDeque<QueuedMessage>,
+    pub history: Vec<String>,
+    pub history_index: Option<usize>,
+    pub history_draft: String,
 }
 
 impl App {
@@ -281,6 +284,9 @@ impl App {
             pending_question: None,
             pending_permission: None,
             message_queue: VecDeque::new(),
+            history: Vec::new(),
+            history_index: None,
+            history_draft: String::new(),
         }
     }
 
@@ -454,6 +460,9 @@ impl App {
         self.input.clear();
         self.cursor_pos = 0;
         self.paste_blocks.clear();
+        self.history.push(trimmed.clone());
+        self.history_index = None;
+        self.history_draft.clear();
         self.is_streaming = true;
         self.streaming_started = Some(Instant::now());
         self.current_response.clear();
@@ -504,6 +513,9 @@ impl App {
             .drain(..)
             .map(|a| (a.media_type, a.data))
             .collect();
+        self.history.push(trimmed.clone());
+        self.history_index = None;
+        self.history_draft.clear();
         self.message_queue.push_back(QueuedMessage {
             text: trimmed,
             images,
@@ -810,6 +822,88 @@ impl App {
             }
         }
         Some(text)
+    }
+
+    pub fn move_cursor_up(&mut self) -> bool {
+        let before = &self.input[..self.cursor_pos];
+        let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
+        if line_start == 0 {
+            return false;
+        }
+        let col = before[line_start..].chars().count();
+        let prev_end = line_start - 1;
+        let prev_start = self.input[..prev_end]
+            .rfind('\n')
+            .map(|p| p + 1)
+            .unwrap_or(0);
+        let prev_line = &self.input[prev_start..prev_end];
+        let target_col = col.min(prev_line.chars().count());
+        let offset: usize = prev_line
+            .chars()
+            .take(target_col)
+            .map(|c| c.len_utf8())
+            .sum();
+        self.cursor_pos = prev_start + offset;
+        true
+    }
+
+    pub fn move_cursor_down(&mut self) -> bool {
+        let after = &self.input[self.cursor_pos..];
+        let next_nl = after.find('\n');
+        let Some(nl_offset) = next_nl else {
+            return false;
+        };
+        let before = &self.input[..self.cursor_pos];
+        let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let col = before[line_start..].chars().count();
+        let next_start = self.cursor_pos + nl_offset + 1;
+        let next_end = self.input[next_start..]
+            .find('\n')
+            .map(|p| next_start + p)
+            .unwrap_or(self.input.len());
+        let next_line = &self.input[next_start..next_end];
+        let target_col = col.min(next_line.chars().count());
+        let offset: usize = next_line
+            .chars()
+            .take(target_col)
+            .map(|c| c.len_utf8())
+            .sum();
+        self.cursor_pos = next_start + offset;
+        true
+    }
+
+    pub fn history_prev(&mut self) {
+        if self.history.is_empty() {
+            return;
+        }
+        match self.history_index {
+            None => {
+                self.history_draft = self.input.clone();
+                self.history_index = Some(self.history.len() - 1);
+            }
+            Some(0) => return,
+            Some(i) => {
+                self.history_index = Some(i - 1);
+            }
+        }
+        self.input = self.history[self.history_index.unwrap()].clone();
+        self.cursor_pos = self.input.len();
+        self.paste_blocks.clear();
+    }
+
+    pub fn history_next(&mut self) {
+        let Some(idx) = self.history_index else {
+            return;
+        };
+        if idx + 1 >= self.history.len() {
+            self.history_index = None;
+            self.input = std::mem::take(&mut self.history_draft);
+        } else {
+            self.history_index = Some(idx + 1);
+            self.input = self.history[idx + 1].clone();
+        }
+        self.cursor_pos = self.input.len();
+        self.paste_blocks.clear();
     }
 }
 

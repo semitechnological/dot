@@ -433,6 +433,12 @@ fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
                 app.delete_to_start();
                 return InputAction::None;
             }
+            KeyCode::Char('j') => {
+                if !app.input.is_empty() {
+                    app.insert_char('\n');
+                }
+                return InputAction::None;
+            }
             _ => {}
         }
     }
@@ -443,9 +449,27 @@ fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
                 app.mode = AppMode::Normal;
                 InputAction::None
             }
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                if !app.input.is_empty() {
+                    app.insert_char('\n');
+                }
+                InputAction::None
+            }
             KeyCode::Enter => handle_send(app),
             KeyCode::Char(c) => handle_char_input(app, c),
             KeyCode::Backspace => handle_backspace(app),
+            KeyCode::Up => {
+                if !app.move_cursor_up() {
+                    app.history_prev();
+                }
+                InputAction::None
+            }
+            KeyCode::Down => {
+                if !app.move_cursor_down() {
+                    app.history_next();
+                }
+                InputAction::None
+            }
             KeyCode::Left => {
                 app.move_cursor_left();
                 InputAction::None
@@ -471,9 +495,27 @@ fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
             app.mode = AppMode::Normal;
             InputAction::None
         }
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if !app.input.is_empty() {
+                app.insert_char('\n');
+            }
+            InputAction::None
+        }
         KeyCode::Enter => handle_send(app),
         KeyCode::Char(c) => handle_char_input(app, c),
         KeyCode::Backspace => handle_backspace(app),
+        KeyCode::Up => {
+            if !app.move_cursor_up() {
+                app.history_prev();
+            }
+            InputAction::None
+        }
+        KeyCode::Down => {
+            if !app.move_cursor_down() {
+                app.history_next();
+            }
+            InputAction::None
+        }
         KeyCode::Left => {
             app.move_cursor_left();
             InputAction::None
@@ -519,16 +561,38 @@ fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
                 return InputAction::None;
             }
             KeyCode::Char('d') => return InputAction::ScrollDown(10),
+            KeyCode::Char('j') => {
+                if !app.input.is_empty() {
+                    app.insert_char('\n');
+                }
+                return InputAction::None;
+            }
             _ => {}
         }
     }
 
     if app.is_streaming {
         return match key.code {
-            KeyCode::Up => InputAction::ScrollUp(1),
-            KeyCode::Down => InputAction::ScrollDown(1),
+            KeyCode::Up => {
+                if !app.move_cursor_up() {
+                    app.history_prev();
+                }
+                InputAction::None
+            }
+            KeyCode::Down => {
+                if !app.move_cursor_down() {
+                    app.history_next();
+                }
+                InputAction::None
+            }
             KeyCode::PageUp => InputAction::ScrollUp(20),
             KeyCode::PageDown => InputAction::ScrollDown(20),
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                if !app.input.is_empty() {
+                    app.insert_char('\n');
+                }
+                InputAction::None
+            }
             KeyCode::Enter => handle_send(app),
             KeyCode::Char(c) => handle_char_input(app, c),
             KeyCode::Backspace => handle_backspace(app),
@@ -554,9 +618,25 @@ fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
 
     match key.code {
         KeyCode::Esc => InputAction::None,
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            if !app.input.is_empty() {
+                app.insert_char('\n');
+            }
+            InputAction::None
+        }
         KeyCode::Enter => handle_send(app),
-        KeyCode::Up => InputAction::ScrollUp(1),
-        KeyCode::Down => InputAction::ScrollDown(1),
+        KeyCode::Up => {
+            if !app.move_cursor_up() {
+                app.history_prev();
+            }
+            InputAction::None
+        }
+        KeyCode::Down => {
+            if !app.move_cursor_down() {
+                app.history_next();
+            }
+            InputAction::None
+        }
         KeyCode::PageUp => InputAction::ScrollUp(20),
         KeyCode::PageDown => InputAction::ScrollDown(20),
         KeyCode::Tab => InputAction::OpenAgentSelector,

@@ -107,6 +107,8 @@ async fn run_app(
         .map(|p| p.name.clone())
         .unwrap_or_else(|| "dot".to_string());
 
+    let history = db.get_user_message_history(500).unwrap_or_default();
+
     let agents_context = crate::context::AgentsContext::load(&cwd, &config.context);
     let agent = Arc::new(Mutex::new(Agent::new(
         providers,
@@ -147,6 +149,7 @@ async fn run_app(
         config.tui.vim_mode,
         context_window,
     );
+    app.history = history;
 
     if let Some(ref id) = resume_id {
         let agent_lock = agent.lock().await;

@@ -2,10 +2,7 @@ use std::collections::HashMap;
 
 use crate::config::AgentConfig;
 
-pub(super) const DEFAULT_SYSTEM_PROMPT: &str = "You are dot, a helpful AI coding assistant running in a terminal. \
-You have access to tools for reading/writing files, running shell commands, and searching code. \
-Be concise and direct. When asked to make changes, use the tools to implement them. \
-Don't just describe what to do.";
+pub(super) const DEFAULT_SYSTEM_PROMPT: &str = include_str!("prompt.txt");
 
 #[derive(Debug, Clone)]
 pub struct AgentProfile {

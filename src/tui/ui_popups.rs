@@ -5,8 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::tui::app::App;
-use crate::tui::widgets::COMMANDS;
-use crate::tui::widgets::ThinkingLevel;
+use crate::tui::widgets::{COMMANDS, PaletteEntryKind, ThinkingLevel};
 
 fn popup_block(title: &str, theme_accent: Color, theme_muted: Color) -> Block<'static> {
     Block::default()
@@ -203,21 +202,19 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
         return;
     }
 
-    let items: Vec<(&str, &str, &str)> = palette
+    let items: Vec<&crate::tui::widgets::PaletteEntry> = palette
         .filtered
         .iter()
-        .map(|&i| {
-            (
-                COMMANDS[i].name,
-                COMMANDS[i].description,
-                COMMANDS[i].shortcut,
-            )
-        })
+        .map(|&i| &palette.entries[i])
         .collect();
+
+    let name_w = items.iter().map(|e| e.name.len()).max().unwrap_or(8) + 2;
+    let compact = input_area.width < 50;
+    let desc_w = if compact { 16 } else { 24 };
 
     let content_width = items
         .iter()
-        .map(|(n, d, s)| n.len() + d.len() + s.len() + 12)
+        .map(|e| e.name.len() + e.description.len() + e.shortcut.len() + 12)
         .max()
         .unwrap_or(20) as u16;
     let content_height = items.len() as u16;
@@ -238,23 +235,29 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let compact = popup.width < 50;
-    let (name_w, desc_w) = if compact { (10, 16) } else { (10, 24) };
+    let visible_count = inner.height as usize;
+    let scroll = if palette.selected >= visible_count {
+        palette.selected - visible_count + 1
+    } else {
+        0
+    };
 
     let mut cmd_lines: Vec<Line<'static>> = Vec::new();
-    for (i, (name, desc, shortcut)) in items.iter().enumerate() {
+    for (i, entry) in items.iter().enumerate().skip(scroll).take(visible_count) {
         let is_sel = i == palette.selected;
+        let is_skill = entry.kind == PaletteEntryKind::Skill;
+        let prefix = if is_skill { "\u{25c7} " } else { "/ " };
         let mut spans = if is_sel {
             vec![
                 Span::styled(" \u{25b8} ", Style::default().fg(app.theme.accent)),
                 Span::styled(
-                    format!("/{:<width$}", name, width = name_w),
+                    format!("{}{:<width$}", prefix, entry.name, width = name_w),
                     Style::default()
                         .fg(app.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("{:<width$}", desc, width = desc_w),
+                    format!("{:<width$}", entry.description, width = desc_w),
                     Style::default().fg(app.theme.accent),
                 ),
             ]
@@ -262,15 +265,18 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
             vec![
                 Span::raw("   "),
                 Span::styled(
-                    format!("/{:<width$}", name, width = name_w),
+                    format!("{}{:<width$}", prefix, entry.name, width = name_w),
                     Style::default().fg(Color::Reset),
                 ),
-                Span::styled(format!("{:<width$}", desc, width = desc_w), app.theme.dim),
+                Span::styled(
+                    format!("{:<width$}", entry.description, width = desc_w),
+                    app.theme.dim,
+                ),
             ]
         };
-        if !shortcut.is_empty() && !compact {
+        if !entry.shortcut.is_empty() && !compact {
             spans.push(Span::styled(
-                shortcut.to_string(),
+                entry.shortcut.clone(),
                 Style::default().fg(app.theme.muted_fg),
             ));
         }

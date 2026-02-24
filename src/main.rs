@@ -89,14 +89,14 @@ async fn main() -> Result<()> {
             let creds = dot::auth::Credentials::load()?;
             let db = dot::db::Db::open().context("opening database")?;
             let providers = build_providers(&config, &creds)?;
-            let tools = build_tool_registry(&config);
+            let (tools, skill_names) = build_tool_registry(&config);
             let profiles = build_agent_profiles(&config);
             let cwd = std::env::current_dir()
                 .ok()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
             let resume_id = cli.session.clone();
-            dot::tui::run(config, providers, db, tools, profiles, cwd, resume_id).await?;
+            dot::tui::run(config, providers, db, tools, profiles, cwd, resume_id, skill_names).await?;
         }
     }
     Ok(())
@@ -112,7 +112,7 @@ fn try_list_mcp_tools(
     client.list_tools()
 }
 
-fn build_tool_registry(config: &dot::config::Config) -> dot::tools::ToolRegistry {
+fn build_tool_registry(config: &dot::config::Config) -> (dot::tools::ToolRegistry, Vec<(String, String)>) {
     let mut registry = dot::tools::ToolRegistry::default_tools();
 
     for (name, cfg) in &config.mcp {
@@ -135,12 +135,17 @@ fn build_tool_registry(config: &dot::config::Config) -> dot::tools::ToolRegistry
     }
 
     let skill_registry = dot::skills::SkillRegistry::discover();
+    let skill_names: Vec<(String, String)> = skill_registry
+        .skills()
+        .iter()
+        .map(|s| (s.name.clone(), s.description.clone()))
+        .collect();
     if let Some(skill_tool) = skill_registry.into_tool() {
         registry.register(Box::new(skill_tool));
     }
 
     tracing::info!("Tool registry: {} tools total", registry.tool_count());
-    registry
+    (registry, skill_names)
 }
 
 fn build_agent_profiles(config: &dot::config::Config) -> Vec<dot::agent::AgentProfile> {

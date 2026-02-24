@@ -222,6 +222,7 @@ pub struct App {
     pub history: Vec<String>,
     pub history_index: Option<usize>,
     pub history_draft: String,
+    pub skill_entries: Vec<(String, String)>,
 }
 
 impl App {
@@ -287,6 +288,7 @@ impl App {
             history: Vec::new(),
             history_index: None,
             history_draft: String::new(),
+            skill_entries: Vec::new(),
         }
     }
 

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::tui::app::{App, AppMode};
-use crate::tui::widgets::ThinkingLevel;
+use crate::tui::widgets::{PaletteEntry, PaletteEntryKind, ThinkingLevel};
 
 pub enum InputAction {
     AnswerQuestion(String),
@@ -30,6 +30,7 @@ pub enum InputAction {
     CycleThinkingLevel,
     TruncateToMessage(usize),
     ForkFromMessage(usize),
+    LoadSkill { name: String },
 }
 
 pub fn handle_paste(app: &mut App, text: String) -> InputAction {
@@ -304,10 +305,10 @@ fn handle_command_palette(app: &mut App, key: KeyEvent) -> InputAction {
             InputAction::None
         }
         KeyCode::Enter => {
-            if let Some(cmd_name) = app.command_palette.confirm() {
+            if let Some(entry) = app.command_palette.confirm() {
                 app.input.clear();
                 app.cursor_pos = 0;
-                execute_command(app, cmd_name)
+                execute_palette_entry(app, entry)
             } else {
                 InputAction::None
             }
@@ -352,6 +353,13 @@ fn execute_command(app: &mut App, cmd_name: &str) -> InputAction {
     }
 }
 
+fn execute_palette_entry(app: &mut App, entry: PaletteEntry) -> InputAction {
+    match entry.kind {
+        PaletteEntryKind::Command => execute_command(app, &entry.name),
+        PaletteEntryKind::Skill => InputAction::LoadSkill { name: entry.name },
+    }
+}
+
 fn handle_context_menu(app: &mut App, key: KeyEvent) -> InputAction {
     match key.code {
         KeyCode::Esc => {
@@ -384,9 +392,18 @@ fn handle_context_menu(app: &mut App, key: KeyEvent) -> InputAction {
 fn handle_normal(app: &mut App, key: KeyEvent) -> InputAction {
     match key.code {
         KeyCode::Char('q') => InputAction::Quit,
-        KeyCode::Char('i') | KeyCode::Enter => {
+        KeyCode::Char('i') => {
             app.mode = AppMode::Insert;
             InputAction::None
+        }
+        KeyCode::Enter => {
+            if !app.input.is_empty() {
+                app.mode = AppMode::Insert;
+                handle_send(app)
+            } else {
+                app.mode = AppMode::Insert;
+                InputAction::None
+            }
         }
         KeyCode::Char('j') | KeyCode::Down => InputAction::ScrollDown(1),
         KeyCode::Char('k') | KeyCode::Up => InputAction::ScrollUp(1),
@@ -678,6 +695,9 @@ fn handle_send(app: &mut App) -> InputAction {
 fn handle_char_input(app: &mut App, c: char) -> InputAction {
     app.insert_char(c);
     if app.input == "/" {
+        if app.command_palette.entries.is_empty() {
+            app.command_palette.set_skills(&app.skill_entries);
+        }
         app.command_palette.open(&app.input);
     } else if app.input.starts_with('/') && app.command_palette.visible {
         app.command_palette.update_filter(&app.input);
@@ -696,6 +716,9 @@ fn handle_backspace(app: &mut App) -> InputAction {
     }
     if app.input.starts_with('/') && !app.input.is_empty() {
         if !app.command_palette.visible {
+            if app.command_palette.entries.is_empty() {
+                app.command_palette.set_skills(&app.skill_entries);
+            }
             app.command_palette.open(&app.input);
         } else {
             app.command_palette.update_filter(&app.input);
@@ -824,10 +847,10 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                     let relative_row = row.saturating_sub(popup.y) as usize;
                     if relative_row < app.command_palette.filtered.len() {
                         app.command_palette.selected = relative_row;
-                        if let Some(cmd_name) = app.command_palette.confirm() {
+            if let Some(entry) = app.command_palette.confirm() {
                             app.input.clear();
                             app.cursor_pos = 0;
-                            return execute_command(app, cmd_name);
+                            return execute_palette_entry(app, entry);
                         }
                     }
                     return InputAction::None;

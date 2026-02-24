@@ -190,7 +190,27 @@ fn render_code_block(
         output.push(Line::from(Span::styled(label, theme.dim)));
     }
 
-    if let Some(syntect_theme_name) = theme.syntect_theme
+    let is_diff = lang == "diff" || lang == "patch";
+    if is_diff {
+        for line in code_lines {
+            let style = if line.starts_with('+') {
+                theme.diff_add.bg(theme.code_bg)
+            } else if line.starts_with('-') {
+                theme.diff_remove.bg(theme.code_bg)
+            } else if line.starts_with('@') {
+                theme.diff_hunk.bg(theme.code_bg)
+            } else {
+                Style::default().fg(theme.fg).bg(theme.code_bg)
+            };
+            output.push(Line::from(Span::styled(format!("  {}", line), style)));
+        }
+        if code_lines.is_empty() {
+            output.push(Line::from(Span::styled(
+                "  ",
+                Style::default().bg(theme.code_bg),
+            )));
+        }
+    } else if let Some(syntect_theme_name) = theme.syntect_theme
         && !lang.is_empty()
         && let Some(syntax) = SYNTAX_SET.find_syntax_by_token(lang)
         && let Some(st_theme) = THEME_SET.themes.get(syntect_theme_name)

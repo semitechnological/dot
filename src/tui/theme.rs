@@ -84,6 +84,9 @@ pub struct Theme {
     pub tool_exit_ok: Style,
     pub tool_exit_err: Style,
     pub syntect_theme: Option<&'static str>,
+    pub diff_add: Style,
+    pub diff_remove: Style,
+    pub diff_hunk: Style,
 }
 
 impl Theme {
@@ -163,6 +166,9 @@ impl Theme {
             tool_exit_ok: Style::default().fg(green),
             tool_exit_err: Style::default().fg(red),
             syntect_theme: Some("base16-ocean.dark"),
+            diff_add: Style::default().fg(green),
+            diff_remove: Style::default().fg(red),
+            diff_hunk: Style::default().fg(accent),
         }
     }
 
@@ -229,6 +235,9 @@ impl Theme {
             tool_exit_ok: Style::default().fg(green),
             tool_exit_err: Style::default().fg(red),
             syntect_theme: Some("base16-ocean.light"),
+            diff_add: Style::default().fg(green),
+            diff_remove: Style::default().fg(red),
+            diff_hunk: Style::default().fg(accent),
         }
     }
 
@@ -291,6 +300,9 @@ impl Theme {
             tool_exit_ok: Style::default().fg(green),
             tool_exit_err: Style::default().fg(red),
             syntect_theme: None,
+            diff_add: Style::default().fg(green),
+            diff_remove: Style::default().fg(red),
+            diff_hunk: Style::default().fg(cyan),
         }
     }
 }

@@ -40,6 +40,7 @@ pub async fn run(
     profiles: Vec<AgentProfile>,
     cwd: String,
     resume_id: Option<String>,
+    skill_names: Vec<(String, String)>,
 ) -> Result<()> {
     terminal::enable_raw_mode()?;
     let mut stdout = std::io::stderr();
@@ -61,6 +62,7 @@ pub async fn run(
         profiles,
         cwd,
         resume_id,
+        skill_names,
     )
     .await;
 
@@ -99,6 +101,7 @@ async fn run_app(
     profiles: Vec<AgentProfile>,
     cwd: String,
     resume_id: Option<String>,
+    skill_names: Vec<(String, String)>,
 ) -> Result<ExitInfo> {
     let model_name = providers[0].model().to_string();
     let provider_name = providers[0].name().to_string();
@@ -150,6 +153,7 @@ async fn run_app(
         context_window,
     );
     app.history = history;
+    app.skill_entries = skill_names;
 
     if let Some(ref id) = resume_id {
         let agent_lock = agent.lock().await;
@@ -508,6 +512,27 @@ async fn dispatch_action(
                 model: None,
             });
             app.scroll_to_bottom();
+        }
+        InputAction::LoadSkill { name } => {
+            let display = format!("/{}", name);
+            app.messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: display,
+                tool_calls: Vec::new(),
+                thinking: None,
+                model: None,
+            });
+            app.scroll_to_bottom();
+            let msg = format!("Load and use the {} skill", name);
+            let (tx, rx) = mpsc::unbounded_channel();
+            *agent_rx = Some(rx);
+            let agent_clone = Arc::clone(agent);
+            tokio::spawn(async move {
+                let mut agent = agent_clone.lock().await;
+                if let Err(e) = agent.send_message(&msg, tx).await {
+                    tracing::error!("Agent send_message error: {}", e);
+                }
+            });
         }
         InputAction::AnswerPermission(_) | InputAction::None => {}
     }

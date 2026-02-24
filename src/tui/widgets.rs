@@ -228,10 +228,25 @@ pub const COMMANDS: &[SlashCommand] = &[
     },
 ];
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum PaletteEntryKind {
+    Command,
+    Skill,
+}
+
+#[derive(Debug, Clone)]
+pub struct PaletteEntry {
+    pub name: String,
+    pub description: String,
+    pub shortcut: String,
+    pub kind: PaletteEntryKind,
+}
+
 pub struct CommandPalette {
     pub visible: bool,
     pub selected: usize,
     pub filtered: Vec<usize>,
+    pub entries: Vec<PaletteEntry>,
 }
 
 impl Default for CommandPalette {
@@ -246,19 +261,52 @@ impl CommandPalette {
             visible: false,
             selected: 0,
             filtered: Vec::new(),
+            entries: Vec::new(),
+        }
+    }
+
+    pub fn set_skills(&mut self, skills: &[(String, String)]) {
+        self.entries.clear();
+        for cmd in COMMANDS {
+            self.entries.push(PaletteEntry {
+                name: cmd.name.to_string(),
+                description: cmd.description.to_string(),
+                shortcut: cmd.shortcut.to_string(),
+                kind: PaletteEntryKind::Command,
+            });
+        }
+        for (name, desc) in skills {
+            self.entries.push(PaletteEntry {
+                name: name.clone(),
+                description: desc.clone(),
+                shortcut: String::new(),
+                kind: PaletteEntryKind::Skill,
+            });
         }
     }
 
     pub fn update_filter(&mut self, input: &str) {
+        if self.entries.is_empty() {
+            for cmd in COMMANDS {
+                self.entries.push(PaletteEntry {
+                    name: cmd.name.to_string(),
+                    description: cmd.description.to_string(),
+                    shortcut: cmd.shortcut.to_string(),
+                    kind: PaletteEntryKind::Command,
+                });
+            }
+        }
         let query = input.strip_prefix('/').unwrap_or(input).to_lowercase();
-        self.filtered = COMMANDS
+        self.filtered = self
+            .entries
             .iter()
             .enumerate()
-            .filter(|(_, cmd)| {
+            .filter(|(_, e)| {
                 if query.is_empty() {
                     return true;
                 }
-                cmd.name.starts_with(&query) || cmd.aliases.iter().any(|a| a.starts_with(&query))
+                e.name.to_lowercase().starts_with(&query)
+                    || e.description.to_lowercase().contains(&query)
             })
             .map(|(i, _)| i)
             .collect();
@@ -289,10 +337,10 @@ impl CommandPalette {
         }
     }
 
-    pub fn confirm(&mut self) -> Option<&'static str> {
+    pub fn confirm(&mut self) -> Option<PaletteEntry> {
         if self.visible && !self.filtered.is_empty() {
             self.visible = false;
-            Some(COMMANDS[self.filtered[self.selected]].name)
+            Some(self.entries[self.filtered[self.selected]].clone())
         } else {
             None
         }

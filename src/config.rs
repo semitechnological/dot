@@ -102,10 +102,10 @@ impl Default for Config {
 
 impl Config {
     pub fn config_dir() -> PathBuf {
-        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-            if !xdg.is_empty() {
-                return PathBuf::from(xdg).join("dot");
-            }
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+            && !xdg.is_empty()
+        {
+            return PathBuf::from(xdg).join("dot");
         }
         #[cfg(unix)]
         return dirs::home_dir()
@@ -123,10 +123,10 @@ impl Config {
     }
 
     pub fn data_dir() -> PathBuf {
-        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-            if !xdg.is_empty() {
-                return PathBuf::from(xdg).join("dot");
-            }
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME")
+            && !xdg.is_empty()
+        {
+            return PathBuf::from(xdg).join("dot");
         }
         #[cfg(unix)]
         return dirs::home_dir()

@@ -207,9 +207,8 @@ async fn run_app(
             }
         };
 
-        match handle_event(&mut app, &agent, event, &mut agent_rx).await {
-            LoopSignal::Quit => break,
-            _ => {}
+        if let LoopSignal::Quit = handle_event(&mut app, &agent, event, &mut agent_rx).await {
+            break;
         }
     }
 

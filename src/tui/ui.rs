@@ -261,11 +261,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         let alpha = frac as f32;
         for x in area.x..area.x + area.width {
             if let Some(cell) = buf.cell_mut(Position::new(x, content_y)) {
-                cell.set_style(Style::default().fg(blend_color(
-                    cell.fg,
-                    app.theme.bg,
-                    alpha,
-                )));
+                cell.set_style(Style::default().fg(blend_color(cell.fg, app.theme.bg, alpha)));
             }
         }
     }
@@ -543,7 +539,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, inner);
 
     if is_active && !app.model_selector.visible {
-        let blink_on = (app.tick_count / 32) % 2 == 0;
+        let blink_on = (app.tick_count / 32).is_multiple_of(2);
         if blink_on {
             let (cx, cy) = cursor_position(&app.input, app.cursor_pos, inner);
             if cy < inner.y + inner.height {

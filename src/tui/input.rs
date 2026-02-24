@@ -704,10 +704,10 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 app.selection.update(content_col, visual_row);
                 app.selection.active = false;
                 if !app.selection.is_empty_selection() {
-                    if let Some(text) = app.extract_selected_text() {
-                        if !text.trim().is_empty() {
-                            crate::tui::app::copy_to_clipboard(&text);
-                        }
+                    if let Some(text) = app.extract_selected_text()
+                        && !text.trim().is_empty()
+                    {
+                        crate::tui::app::copy_to_clipboard(&text);
                     }
                 } else {
                     app.selection.clear();

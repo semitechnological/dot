@@ -101,40 +101,41 @@ fn render_tool_calls_inner(
             }
         };
 
-        if let Some(ref output) = tc.output {
-            if should_show && !output.is_empty() {
-                let max_lines = if tc.is_error { 6 } else { 4 };
-                let max_chars = 400;
-                let preview: String = output.chars().take(max_chars).collect();
-                let trimmed = if output.len() > max_chars {
-                    format!("{}\u{2026}", preview)
-                } else {
-                    preview
-                };
+        if let Some(ref output) = tc.output
+            && should_show
+            && !output.is_empty()
+        {
+            let max_lines = if tc.is_error { 6 } else { 4 };
+            let max_chars = 400;
+            let preview: String = output.chars().take(max_chars).collect();
+            let trimmed = if output.len() > max_chars {
+                format!("{}\u{2026}", preview)
+            } else {
+                preview
+            };
 
-                let output_style = if tc.is_error {
-                    theme.error
-                } else {
-                    theme.tool_output
-                };
+            let output_style = if tc.is_error {
+                theme.error
+            } else {
+                theme.tool_output
+            };
 
-                for ol in trimmed.lines().take(max_lines) {
-                    lines.push(Line::from(Span::styled(
-                        format!("{}{}", out_pad, ol),
-                        output_style,
-                    )));
-                }
-                let total_lines_in_output = trimmed.lines().count();
-                if total_lines_in_output > max_lines || output.len() > max_chars {
-                    lines.push(Line::from(Span::styled(
-                        format!(
-                            "{}\u{2026} {} more lines",
-                            out_pad,
-                            output.lines().count().saturating_sub(max_lines)
-                        ),
-                        theme.dim,
-                    )));
-                }
+            for ol in trimmed.lines().take(max_lines) {
+                lines.push(Line::from(Span::styled(
+                    format!("{}{}", out_pad, ol),
+                    output_style,
+                )));
+            }
+            let total_lines_in_output = trimmed.lines().count();
+            if total_lines_in_output > max_lines || output.len() > max_chars {
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "{}\u{2026} {} more lines",
+                        out_pad,
+                        output.lines().count().saturating_sub(max_lines)
+                    ),
+                    theme.dim,
+                )));
             }
         }
     }
@@ -183,7 +184,7 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
             padded.extend(line.spans);
             lines.push(Line::from(padded));
         }
-        let blink = (app.tick_count / 32) % 2 == 0;
+        let blink = (app.tick_count / 32).is_multiple_of(2);
         if blink {
             lines.push(Line::from(Span::styled(
                 format!("{}\u{258d}", pad),

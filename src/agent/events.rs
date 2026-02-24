@@ -28,6 +28,7 @@ pub enum AgentEvent {
     Compacted {
         messages_removed: usize,
     },
+    TitleGenerated(String),
 }
 
 pub(super) struct PendingToolCall {

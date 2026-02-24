@@ -142,6 +142,8 @@ pub struct App {
     pub cursor_pos: usize,
     pub scroll_offset: u16,
     pub max_scroll: u16,
+    pub scroll_position: f64,
+    pub scroll_velocity: f64,
     pub is_streaming: bool,
     pub current_response: String,
     pub current_thinking: String,
@@ -180,6 +182,9 @@ pub struct App {
     pub selection: TextSelection,
     pub visual_lines: Vec<String>,
     pub content_width: u16,
+
+    pub context_window: u32,
+    pub last_input_tokens: u32,
 }
 
 impl App {
@@ -189,6 +194,7 @@ impl App {
         agent_name: String,
         theme_name: &str,
         vim_mode: bool,
+        context_window: u32,
     ) -> Self {
         Self {
             messages: Vec::new(),
@@ -196,6 +202,8 @@ impl App {
             cursor_pos: 0,
             scroll_offset: 0,
             max_scroll: 0,
+            scroll_position: 0.0,
+            scroll_velocity: 0.0,
             is_streaming: false,
             current_response: String::new(),
             current_thinking: String::new(),
@@ -230,6 +238,8 @@ impl App {
             selection: TextSelection::default(),
             visual_lines: Vec::new(),
             content_width: 0,
+            context_window,
+            last_input_tokens: 0,
         }
     }
 
@@ -306,6 +316,7 @@ impl App {
             AgentEvent::Done { usage } => {
                 self.is_streaming = false;
                 self.streaming_started = None;
+                self.last_input_tokens = usage.input_tokens;
                 self.usage.input_tokens += usage.input_tokens;
                 self.usage.output_tokens += usage.output_tokens;
             }
@@ -322,6 +333,9 @@ impl App {
                     thinking: None,
                     model: None,
                 });
+            }
+            AgentEvent::TitleGenerated(title) => {
+                self.conversation_title = Some(title);
             }
             AgentEvent::Compacted { messages_removed } => {
                 if let Some(last) = self.messages.last_mut()
@@ -367,9 +381,6 @@ impl App {
             thinking: None,
             model: None,
         });
-        if self.conversation_title.is_none() {
-            self.conversation_title = Some(trimmed.chars().take(60).collect());
-        }
         self.input.clear();
         self.cursor_pos = 0;
         self.paste_blocks.clear();
@@ -493,24 +504,57 @@ impl App {
 
     pub fn scroll_up(&mut self, n: u16) {
         self.follow_bottom = false;
-        self.scroll_offset = self.scroll_offset.saturating_sub(n);
+        self.scroll_velocity -= n as f64 * 0.25;
+        self.scroll_velocity = self.scroll_velocity.clamp(-40.0, 40.0);
     }
 
     pub fn scroll_down(&mut self, n: u16) {
-        self.scroll_offset = (self.scroll_offset + n).min(self.max_scroll);
-        if self.scroll_offset >= self.max_scroll {
-            self.follow_bottom = true;
-        }
+        self.scroll_velocity += n as f64 * 0.25;
+        self.scroll_velocity = self.scroll_velocity.clamp(-40.0, 40.0);
     }
 
     pub fn scroll_to_top(&mut self) {
         self.follow_bottom = false;
-        self.scroll_offset = 0;
+        self.scroll_position = 0.0;
+        self.scroll_velocity = 0.0;
     }
 
     pub fn scroll_to_bottom(&mut self) {
         self.follow_bottom = true;
-        self.scroll_offset = self.max_scroll;
+        self.scroll_position = self.max_scroll as f64;
+        self.scroll_velocity = 0.0;
+    }
+
+    pub fn scroll_frac(&self) -> f64 {
+        self.scroll_position - self.scroll_position.floor()
+    }
+
+    pub fn animate_scroll(&mut self) {
+        if self.scroll_velocity.abs() < 0.01 && self.scroll_position == self.scroll_position.round()
+        {
+            return;
+        }
+
+        self.scroll_position += self.scroll_velocity;
+        self.scroll_velocity *= 0.78;
+
+        if self.scroll_velocity.abs() < 0.08 {
+            self.scroll_velocity = 0.0;
+            self.scroll_position = self.scroll_position.round();
+        }
+
+        if self.scroll_position < 0.0 {
+            self.scroll_position = 0.0;
+            self.scroll_velocity = 0.0;
+        }
+        let max = self.max_scroll as f64;
+        if self.scroll_position > max {
+            self.scroll_position = max;
+            self.scroll_velocity = 0.0;
+            self.follow_bottom = true;
+        }
+
+        self.scroll_offset = self.scroll_position.round() as u16;
     }
 
     pub fn clear_conversation(&mut self) {
@@ -519,9 +563,12 @@ impl App {
         self.current_thinking.clear();
         self.current_tool_calls.clear();
         self.scroll_offset = 0;
+        self.scroll_position = 0.0;
+        self.scroll_velocity = 0.0;
         self.max_scroll = 0;
         self.follow_bottom = true;
         self.usage = TokenUsage::default();
+        self.last_input_tokens = 0;
         self.error_message = None;
         self.paste_blocks.clear();
         self.attachments.clear();

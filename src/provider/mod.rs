@@ -99,6 +99,10 @@ pub trait Provider: Send + Sync {
     fn model(&self) -> &str;
     fn set_model(&mut self, model: String);
     fn available_models(&self) -> Vec<String>;
+    fn context_window(&self) -> u32;
+    fn fetch_context_window(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<u32>> + Send + '_>>;
     fn supports_vision(&self) -> bool {
         true
     }
@@ -113,4 +117,18 @@ pub trait Provider: Send + Sync {
         max_tokens: u32,
         thinking_budget: u32,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<UnboundedReceiver<StreamEvent>>> + Send + '_>>;
+
+    fn stream_with_model(
+        &self,
+        model: &str,
+        messages: &[Message],
+        system: Option<&str>,
+        tools: &[ToolDefinition],
+        max_tokens: u32,
+        thinking_budget: u32,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<UnboundedReceiver<StreamEvent>>> + Send + '_>>
+    {
+        let _ = model;
+        self.stream(messages, system, tools, max_tokens, thinking_budget)
+    }
 }

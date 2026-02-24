@@ -1,5 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
+use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
@@ -230,8 +231,13 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         .sum();
     let visible = inner.height as u32;
     app.max_scroll = total_visual.saturating_sub(visible).min(u16::MAX as u32) as u16;
-    if app.follow_bottom || app.scroll_offset > app.max_scroll {
+    if app.follow_bottom {
+        app.scroll_position = app.max_scroll as f64;
+        app.scroll_velocity = 0.0;
         app.scroll_offset = app.max_scroll;
+    } else if app.scroll_position > app.max_scroll as f64 {
+        app.scroll_position = app.max_scroll as f64;
+        app.scroll_velocity = 0.0;
     }
 
     app.content_width = area.width;
@@ -247,6 +253,22 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         .scroll((app.scroll_offset, 0));
 
     frame.render_widget(paragraph, area);
+
+    let frac = app.scroll_frac();
+    if frac > 0.05 && app.scroll_offset < app.max_scroll {
+        let content_y = area.y + 1;
+        let buf = frame.buffer_mut();
+        let alpha = frac as f32;
+        for x in area.x..area.x + area.width {
+            if let Some(cell) = buf.cell_mut(Position::new(x, content_y)) {
+                cell.set_style(Style::default().fg(blend_color(
+                    cell.fg,
+                    app.theme.bg,
+                    alpha,
+                )));
+            }
+        }
+    }
 
     render_selection_highlight(frame, app, area);
 
@@ -588,13 +610,9 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
 
     let left_width: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
 
-    let scroll_indicator = if app.max_scroll > 0 {
-        let pct = if app.max_scroll == 0 {
-            100
-        } else {
-            (app.scroll_offset as u32 * 100 / app.max_scroll as u32).min(100)
-        };
-        format!("{}% ", pct)
+    let context_indicator = if app.context_window > 0 && app.last_input_tokens > 0 {
+        let pct = (app.last_input_tokens as f64 / app.context_window as f64 * 100.0).min(100.0);
+        format!("{:.0}% ", pct)
     } else {
         String::new()
     };
@@ -620,12 +638,12 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
         "? help "
     };
 
-    let right_width = scroll_indicator.len() + hint.len();
+    let right_width = context_indicator.len() + hint.len();
     let padding = (area.width as usize).saturating_sub(left_width + right_width);
 
     let mut line_spans = left_spans;
     line_spans.push(Span::raw(" ".repeat(padding)));
-    line_spans.push(Span::styled(scroll_indicator, app.theme.dim));
+    line_spans.push(Span::styled(context_indicator, app.theme.dim));
     line_spans.push(Span::styled(hint.to_string(), app.theme.dim));
 
     frame.render_widget(Paragraph::new(Line::from(line_spans)), area);
@@ -719,4 +737,32 @@ fn render_selection_highlight(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
     }
+}
+
+fn color_to_rgb(c: Color) -> (u8, u8, u8) {
+    match c {
+        Color::Rgb(r, g, b) => (r, g, b),
+        Color::Black => (0, 0, 0),
+        Color::White => (255, 255, 255),
+        Color::DarkGray => (80, 80, 80),
+        Color::Gray => (160, 160, 160),
+        Color::Red => (204, 36, 29),
+        Color::Green => (152, 195, 121),
+        Color::Yellow => (229, 192, 123),
+        Color::Blue => (97, 175, 239),
+        Color::Magenta => (198, 120, 221),
+        Color::Cyan => (86, 182, 194),
+        _ => (200, 200, 200),
+    }
+}
+
+fn blend_color(fg: Color, bg: Color, t: f32) -> Color {
+    let (fr, fg_g, fb) = color_to_rgb(fg);
+    let (br, bg_g, bb) = color_to_rgb(bg);
+    let inv = 1.0 - t;
+    Color::Rgb(
+        (fr as f32 * inv + br as f32 * t) as u8,
+        (fg_g as f32 * inv + bg_g as f32 * t) as u8,
+        (fb as f32 * inv + bb as f32 * t) as u8,
+    )
 }

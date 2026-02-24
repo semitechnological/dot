@@ -7,6 +7,7 @@ use stream::process_sse_stream;
 use types::{AnthropicRequest, convert_messages, convert_tools};
 
 use std::{
+    collections::HashMap,
     future::Future,
     pin::Pin,
     time::{SystemTime, UNIX_EPOCH},
@@ -23,6 +24,7 @@ pub struct AnthropicProvider {
     model: String,
     auth: tokio::sync::Mutex<AnthropicAuth>,
     cached_models: std::sync::Mutex<Option<Vec<String>>>,
+    context_windows: std::sync::Mutex<HashMap<String, u32>>,
 }
 
 impl AnthropicProvider {
@@ -35,6 +37,7 @@ impl AnthropicProvider {
             model: model.into(),
             auth: tokio::sync::Mutex::new(AnthropicAuth::ApiKey(api_key.into())),
             cached_models: std::sync::Mutex::new(None),
+            context_windows: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -56,7 +59,37 @@ impl AnthropicProvider {
                 expires_at,
             }),
             cached_models: std::sync::Mutex::new(None),
+            context_windows: std::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    async fn fetch_model_context_window(&self, model: &str) -> anyhow::Result<u32> {
+        let auth = self.resolve_auth().await?;
+        let url = format!("https://api.anthropic.com/v1/models/{model}");
+        let mut req = self
+            .client
+            .get(&url)
+            .header(&auth.header_name, &auth.header_value)
+            .header("anthropic-version", "2023-06-01");
+        if auth.is_oauth {
+            req = req
+                .header(
+                    "anthropic-beta",
+                    "oauth-2025-04-20,interleaved-thinking-2025-05-14",
+                )
+                .header("user-agent", "claude-code/2.1.49 (external, cli)");
+        }
+        let resp = req.send().await.context("Failed to fetch model info")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!("Anthropic model API error {status}: {body}"));
+        }
+        let data: serde_json::Value = resp.json().await?;
+        data["context_window"]
+            .as_u64()
+            .map(|v| v as u32)
+            .ok_or_else(|| anyhow::anyhow!("context_window not found in model response"))
     }
 
     async fn resolve_auth(&self) -> anyhow::Result<AuthResolved> {
@@ -135,6 +168,28 @@ impl Provider for AnthropicProvider {
         cache.clone().unwrap_or_default()
     }
 
+    fn context_window(&self) -> u32 {
+        let cw = self.context_windows.lock().unwrap();
+        cw.get(&self.model).copied().unwrap_or(0)
+    }
+
+    fn fetch_context_window(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<u32>> + Send + '_>> {
+        Box::pin(async move {
+            {
+                let cw = self.context_windows.lock().unwrap();
+                if let Some(&val) = cw.get(&self.model) {
+                    return Ok(val);
+                }
+            }
+            let val = self.fetch_model_context_window(&self.model).await?;
+            let mut cw = self.context_windows.lock().unwrap();
+            cw.insert(self.model.clone(), val);
+            Ok(val)
+        })
+    }
+
     fn fetch_models(
         &self,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<String>>> + Send + '_>> {
@@ -147,6 +202,7 @@ impl Provider for AnthropicProvider {
             }
             let auth = self.resolve_auth().await?;
             let mut all_models: Vec<String> = Vec::new();
+            let mut cw_map: HashMap<String, u32> = HashMap::new();
             let mut after_id: Option<String> = None;
 
             loop {
@@ -192,6 +248,9 @@ impl Provider for AnthropicProvider {
                     for m in arr {
                         if let Some(id) = m["id"].as_str() {
                             all_models.push(id.to_string());
+                            if let Some(cw) = m["context_window"].as_u64() {
+                                cw_map.insert(id.to_string(), cw as u32);
+                            }
                         }
                     }
                 }
@@ -214,6 +273,10 @@ impl Provider for AnthropicProvider {
             all_models.sort();
             let mut cache = self.cached_models.lock().unwrap();
             *cache = Some(all_models.clone());
+            drop(cache);
+
+            let mut cw_cache = self.context_windows.lock().unwrap();
+            *cw_cache = cw_map;
 
             Ok(all_models)
         })
@@ -228,9 +291,30 @@ impl Provider for AnthropicProvider {
         thinking_budget: u32,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<UnboundedReceiver<StreamEvent>>> + Send + '_>>
     {
+        self.stream_with_model(
+            &self.model,
+            messages,
+            system,
+            tools,
+            max_tokens,
+            thinking_budget,
+        )
+    }
+
+    fn stream_with_model(
+        &self,
+        model: &str,
+        messages: &[Message],
+        system: Option<&str>,
+        tools: &[ToolDefinition],
+        max_tokens: u32,
+        thinking_budget: u32,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<UnboundedReceiver<StreamEvent>>> + Send + '_>>
+    {
         let messages = messages.to_vec();
         let system = system.map(String::from);
         let tools = tools.to_vec();
+        let model = model.to_string();
 
         Box::pin(async move {
             let auth = self.resolve_auth().await?;
@@ -257,7 +341,7 @@ impl Provider for AnthropicProvider {
             };
 
             let body = AnthropicRequest {
-                model: &self.model,
+                model: &model,
                 messages: convert_messages(&messages),
                 max_tokens: effective_max_tokens,
                 stream: true,

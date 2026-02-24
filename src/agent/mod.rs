@@ -13,9 +13,27 @@ use crate::tools::ToolRegistry;
 use anyhow::Result;
 use tokio::sync::mpsc::UnboundedSender;
 
-const COMPACT_CONTEXT_LIMIT: u32 = 200_000;
 const COMPACT_THRESHOLD: f32 = 0.8;
 const COMPACT_KEEP_MESSAGES: usize = 10;
+
+const TITLE_SYSTEM_PROMPT: &str = "\
+You are a title generator. You output ONLY a thread title. Nothing else.
+
+Generate a brief title that would help the user find this conversation later.
+
+Rules:
+- A single line, 50 characters or fewer
+- No explanations, no quotes, no punctuation wrapping
+- Use the same language as the user message
+- Title must be grammatically correct and read naturally
+- Never include tool names (e.g. read tool, bash tool, edit tool)
+- Focus on the main topic or question the user wants to retrieve
+- Vary your phrasing — avoid repetitive patterns like always starting with \"Analyzing\"
+- When a file is mentioned, focus on WHAT the user wants to do WITH the file
+- Keep exact: technical terms, numbers, filenames, HTTP codes
+- Remove filler words: the, this, my, a, an
+- If the user message is short or conversational (e.g. \"hello\", \"hey\"): \
+  create a title reflecting the user's tone (Greeting, Quick check-in, etc.)";
 
 pub struct Agent {
     providers: Vec<Box<dyn Provider>>,
@@ -123,6 +141,18 @@ impl Agent {
     pub fn current_agent_name(&self) -> &str {
         &self.profile().name
     }
+    pub fn context_window(&self) -> u32 {
+        self.provider().context_window()
+    }
+    pub async fn fetch_context_window(&self) -> u32 {
+        match self.provider().fetch_context_window().await {
+            Ok(cw) => cw,
+            Err(e) => {
+                tracing::warn!("Failed to fetch context window: {e}");
+                0
+            }
+        }
+    }
     pub fn agent_profiles(&self) -> &[AgentProfile] {
         &self.profiles
     }
@@ -145,10 +175,13 @@ impl Agent {
             false
         }
     }
-    pub fn new_conversation(&mut self) -> Result<()> {
+    pub fn cleanup_if_empty(&mut self) {
         if self.messages.is_empty() {
             let _ = self.db.delete_conversation(&self.conversation_id);
         }
+    }
+    pub fn new_conversation(&mut self) -> Result<()> {
+        self.cleanup_if_empty();
         let conversation_id = self.db.create_conversation(
             self.provider().model(),
             self.provider().name(),
@@ -190,8 +223,18 @@ impl Agent {
     pub fn cwd(&self) -> &str {
         &self.cwd
     }
+
+    fn title_model(&self) -> &str {
+        match self.provider().name() {
+            "anthropic" => "claude-3-5-haiku-20241022",
+            "openai" => "gpt-5-nano",
+            _ => self.provider().model(),
+        }
+    }
+
     fn should_compact(&self) -> bool {
-        let threshold = (COMPACT_CONTEXT_LIMIT as f32 * COMPACT_THRESHOLD) as u32;
+        let limit = self.provider().context_window();
+        let threshold = (limit as f32 * COMPACT_THRESHOLD) as u32;
         self.last_input_tokens >= threshold
     }
     async fn compact(&mut self, event_tx: &UnboundedSender<AgentEvent>) -> Result<()> {
@@ -297,12 +340,28 @@ impl Agent {
             role: Role::User,
             content: blocks,
         });
-        if self.messages.len() == 1 {
-            let title: String = content.chars().take(60).collect();
-            let _ = self
-                .db
-                .update_conversation_title(&self.conversation_id, &title);
-        }
+        let title_rx = if self.messages.len() == 1 {
+            let title_messages = vec![Message {
+                role: Role::User,
+                content: vec![ContentBlock::Text(format!(
+                    "Generate a title for this conversation:\n\n{}",
+                    content
+                ))],
+            }];
+            self.provider()
+                .stream_with_model(
+                    self.title_model(),
+                    &title_messages,
+                    Some(TITLE_SYSTEM_PROMPT),
+                    &[],
+                    100,
+                    0,
+                )
+                .await
+                .ok()
+        } else {
+            None
+        };
         let mut final_usage: Option<Usage> = None;
         let system_prompt = self
             .agents_context
@@ -474,6 +533,28 @@ impl Agent {
                 role: Role::User,
                 content: result_blocks,
             });
+        }
+
+        if let Some(mut rx) = title_rx {
+            let mut raw = String::new();
+            while let Some(event) = rx.recv().await {
+                if let StreamEventType::TextDelta(text) = event.event_type {
+                    raw.push_str(&text);
+                }
+            }
+            let title = raw
+                .trim()
+                .trim_matches('"')
+                .trim_matches('`')
+                .trim_matches('*')
+                .replace('\n', " ");
+            let title: String = title.chars().take(50).collect();
+            if !title.is_empty() {
+                let _ = self
+                    .db
+                    .update_conversation_title(&self.conversation_id, &title);
+                let _ = event_tx.send(AgentEvent::TitleGenerated(title));
+            }
         }
 
         Ok(())

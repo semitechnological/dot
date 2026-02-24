@@ -239,7 +239,7 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
     frame.render_widget(block, popup);
 
     let compact = popup.width < 50;
-    let (name_w, desc_w) = if compact { (8, 16) } else { (10, 24) };
+    let (name_w, desc_w) = if compact { (10, 16) } else { (10, 24) };
 
     let mut cmd_lines: Vec<Line<'static>> = Vec::new();
     for (i, (name, desc, shortcut)) in items.iter().enumerate() {

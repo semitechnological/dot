@@ -554,7 +554,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 app.model_selector.up();
                 return InputAction::None;
             }
-            InputAction::ScrollUp(3)
+            InputAction::ScrollUp(1)
         }
         MouseEventKind::ScrollDown => {
             app.selection.clear();
@@ -565,7 +565,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 app.model_selector.down();
                 return InputAction::None;
             }
-            InputAction::ScrollDown(3)
+            InputAction::ScrollDown(1)
         }
         MouseEventKind::Down(MouseButton::Left) => {
             if app.selection.anchor.is_some() && !app.selection.active {

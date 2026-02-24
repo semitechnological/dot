@@ -255,6 +255,16 @@ impl Provider for OpenAIProvider {
         cache.clone().unwrap_or_default()
     }
 
+    fn context_window(&self) -> u32 {
+        0
+    }
+
+    fn fetch_context_window(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<u32>> + Send + '_>> {
+        Box::pin(async move { Ok(0) })
+    }
+
     fn fetch_models(
         &self,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<String>>> + Send + '_>> {
@@ -306,6 +316,27 @@ impl Provider for OpenAIProvider {
         system: Option<&str>,
         tools: &[ToolDefinition],
         max_tokens: u32,
+        thinking_budget: u32,
+    ) -> Pin<
+        Box<dyn Future<Output = anyhow::Result<mpsc::UnboundedReceiver<StreamEvent>>> + Send + '_>,
+    > {
+        self.stream_with_model(
+            &self.model,
+            messages,
+            system,
+            tools,
+            max_tokens,
+            thinking_budget,
+        )
+    }
+
+    fn stream_with_model(
+        &self,
+        model: &str,
+        messages: &[Message],
+        system: Option<&str>,
+        tools: &[ToolDefinition],
+        max_tokens: u32,
         _thinking_budget: u32,
     ) -> Pin<
         Box<dyn Future<Output = anyhow::Result<mpsc::UnboundedReceiver<StreamEvent>>> + Send + '_>,
@@ -313,7 +344,7 @@ impl Provider for OpenAIProvider {
         let messages = messages.to_vec();
         let system = system.map(String::from);
         let tools = tools.to_vec();
-        let model = self.model.clone();
+        let model = model.to_string();
         let client = self.client.clone();
 
         Box::pin(async move {

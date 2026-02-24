@@ -117,6 +117,15 @@ async fn run_app(
         agents_context,
     )?));
 
+    let context_window = {
+        let agent_lock = agent.lock().await;
+        let cw = agent_lock.fetch_context_window().await;
+        if cw == 0 {
+            tracing::warn!("Failed to fetch context window from API");
+        }
+        cw
+    };
+
     if let Some(ref id) = resume_id {
         let mut agent_lock = agent.lock().await;
         match agent_lock.get_session(id) {
@@ -135,6 +144,7 @@ async fn run_app(
         agent_name,
         &config.theme.name,
         config.tui.vim_mode,
+        context_window,
     );
 
     if let Some(ref id) = resume_id {
@@ -142,12 +152,17 @@ async fn run_app(
         if let Ok(conv) = agent_lock.get_session(id) {
             app.conversation_title = conv.title.clone();
             for m in &conv.messages {
+                let model = if m.role == "assistant" {
+                    Some(conv.model.clone())
+                } else {
+                    None
+                };
                 app.messages.push(ChatMessage {
                     role: m.role.clone(),
                     content: m.content.clone(),
                     tool_calls: Vec::new(),
                     thinking: None,
-                    model: None,
+                    model,
                 });
             }
             app.scroll_to_bottom();
@@ -167,14 +182,12 @@ async fn run_app(
                 agent_event = rx.recv() => {
                     match agent_event {
                         Some(ev) => {
-                            let is_done = matches!(ev, crate::agent::AgentEvent::Done { .. } | crate::agent::AgentEvent::Error(_));
                             app.handle_agent_event(ev);
-                            if is_done {
-                                agent_rx = None;
-                            }
                         }
                         None => {
-                            app.is_streaming = false;
+                            if app.is_streaming {
+                                app.is_streaming = false;
+                            }
                             agent_rx = None;
                         }
                     }
@@ -200,9 +213,10 @@ async fn run_app(
         }
     }
 
-    let agent_lock = agent.lock().await;
+    let mut agent_lock = agent.lock().await;
     let conversation_id = agent_lock.conversation_id().to_string();
     let title = agent_lock.conversation_title();
+    agent_lock.cleanup_if_empty();
     drop(agent_lock);
 
     Ok(ExitInfo {
@@ -322,6 +336,7 @@ async fn dispatch_action(
             match agent_lock.get_session(&id) {
                 Ok(conv) => {
                     let title = conv.title.clone();
+                    let conv_model = conv.model.clone();
                     let messages_for_ui: Vec<(String, String)> = conv
                         .messages
                         .iter()
@@ -333,12 +348,17 @@ async fn dispatch_action(
                             app.clear_conversation();
                             app.conversation_title = title;
                             for (role, content) in messages_for_ui {
+                                let model = if role == "assistant" {
+                                    Some(conv_model.clone())
+                                } else {
+                                    None
+                                };
                                 app.messages.push(ChatMessage {
                                     role,
                                     content,
                                     tool_calls: Vec::new(),
                                     thinking: None,
-                                    model: None,
+                                    model,
                                 });
                             }
                             app.scroll_to_bottom();
@@ -358,12 +378,24 @@ async fn dispatch_action(
         InputAction::SelectModel { provider, model } => {
             let mut agent_lock = agent.lock().await;
             agent_lock.set_active_provider(&provider, &model);
+            let cw = agent_lock.context_window();
+            if cw > 0 {
+                app.context_window = cw;
+            } else {
+                app.context_window = agent_lock.fetch_context_window().await;
+            }
         }
         InputAction::SelectAgent { name } => {
             let mut agent_lock = agent.lock().await;
             agent_lock.switch_agent(&name);
             app.model_name = agent_lock.current_model().to_string();
             app.provider_name = agent_lock.current_provider_name().to_string();
+            let cw = agent_lock.context_window();
+            if cw > 0 {
+                app.context_window = cw;
+            } else {
+                app.context_window = agent_lock.fetch_context_window().await;
+            }
         }
         InputAction::ScrollUp(n) => app.scroll_up(n),
         InputAction::ScrollDown(n) => app.scroll_down(n),
@@ -398,6 +430,7 @@ async fn handle_event(
         AppEvent::Paste(text) => input::handle_paste(app, text),
         AppEvent::Tick => {
             app.tick_count = app.tick_count.wrapping_add(1);
+            app.animate_scroll();
             return LoopSignal::Continue;
         }
         AppEvent::Agent(ev) => {

@@ -70,6 +70,21 @@ fn render_tool_calls_inner(
                 ToolCategory::Skill => {
                     header_spans.push(Span::styled(tc.detail.clone(), theme.tool_skill));
                 }
+                ToolCategory::Glob | ToolCategory::Grep => {
+                    header_spans.push(Span::styled(tc.detail.clone(), theme.dim));
+                }
+                ToolCategory::WebFetch => {
+                    header_spans.push(Span::styled(tc.detail.clone(), theme.tool_path));
+                }
+                ToolCategory::Patch => {
+                    header_spans.push(Span::styled(tc.detail.clone(), theme.dim));
+                }
+                ToolCategory::Snapshot => {
+                    header_spans.push(Span::styled(tc.detail.clone(), theme.dim));
+                }
+                ToolCategory::Question => {
+                    header_spans.push(Span::styled(tc.detail.clone(), theme.dim));
+                }
                 ToolCategory::Unknown => {
                     header_spans.push(Span::styled(tc.name.clone(), theme.tool_name));
                 }
@@ -289,6 +304,11 @@ pub fn tool_category_style(category: &ToolCategory, theme: &Theme) -> Style {
         ToolCategory::Command => theme.tool_command,
         ToolCategory::Mcp { .. } => theme.tool_mcp,
         ToolCategory::Skill => theme.tool_skill,
+        ToolCategory::Glob | ToolCategory::Grep => theme.tool_search,
+        ToolCategory::WebFetch => theme.tool_mcp,
+        ToolCategory::Patch => theme.tool_file_write,
+        ToolCategory::Snapshot => theme.tool_directory,
+        ToolCategory::Question => theme.tool_skill,
         ToolCategory::Unknown => theme.tool_name,
     }
 }

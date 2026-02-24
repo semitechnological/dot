@@ -6,6 +6,8 @@ use crate::tui::app::{App, AppMode};
 use crate::tui::widgets::ThinkingLevel;
 
 pub enum InputAction {
+    AnswerQuestion(String),
+    AnswerPermission(String),
     None,
     SendMessage(String),
     Quit,
@@ -32,9 +34,6 @@ pub enum InputAction {
 
 pub fn handle_paste(app: &mut App, text: String) -> InputAction {
     if app.vim_mode && app.mode != AppMode::Insert {
-        return InputAction::None;
-    }
-    if app.is_streaming {
         return InputAction::None;
     }
 
@@ -134,6 +133,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
             app.help_popup.close();
         }
         return InputAction::None;
+    }
+
+    if app.pending_question.is_some() {
+        return handle_question_popup(app, key);
+    }
+
+    if app.pending_permission.is_some() {
+        return handle_permission_popup(app, key);
     }
 
     if app.context_menu.visible {
@@ -431,10 +438,32 @@ fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
     }
 
     if app.is_streaming {
-        if key.code == KeyCode::Esc {
-            app.mode = AppMode::Normal;
-        }
-        return InputAction::None;
+        return match key.code {
+            KeyCode::Esc => {
+                app.mode = AppMode::Normal;
+                InputAction::None
+            }
+            KeyCode::Enter => handle_send(app),
+            KeyCode::Char(c) => handle_char_input(app, c),
+            KeyCode::Backspace => handle_backspace(app),
+            KeyCode::Left => {
+                app.move_cursor_left();
+                InputAction::None
+            }
+            KeyCode::Right => {
+                app.move_cursor_right();
+                InputAction::None
+            }
+            KeyCode::Home => {
+                app.move_cursor_home();
+                InputAction::None
+            }
+            KeyCode::End => {
+                app.move_cursor_end();
+                InputAction::None
+            }
+            _ => InputAction::None,
+        };
     }
 
     match key.code {
@@ -500,6 +529,25 @@ fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
             KeyCode::Down => InputAction::ScrollDown(1),
             KeyCode::PageUp => InputAction::ScrollUp(20),
             KeyCode::PageDown => InputAction::ScrollDown(20),
+            KeyCode::Enter => handle_send(app),
+            KeyCode::Char(c) => handle_char_input(app, c),
+            KeyCode::Backspace => handle_backspace(app),
+            KeyCode::Left => {
+                app.move_cursor_left();
+                InputAction::None
+            }
+            KeyCode::Right => {
+                app.move_cursor_right();
+                InputAction::None
+            }
+            KeyCode::Home => {
+                app.move_cursor_home();
+                InputAction::None
+            }
+            KeyCode::End => {
+                app.move_cursor_end();
+                InputAction::None
+            }
             _ => InputAction::None,
         };
     }
@@ -536,6 +584,10 @@ fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
 
 fn handle_send(app: &mut App) -> InputAction {
     parse_at_references(app);
+    if app.is_streaming {
+        app.queue_input();
+        return InputAction::None;
+    }
     if let Some(msg) = app.take_input() {
         InputAction::SendMessage(msg)
     } else {
@@ -830,4 +882,102 @@ fn compute_click_cursor_pos(input: &str, target_col: usize, target_row: usize) -
     }
 
     byte_pos
+}
+
+fn handle_question_popup(app: &mut App, key: KeyEvent) -> InputAction {
+    let pq = app.pending_question.as_mut().unwrap();
+    match key.code {
+        KeyCode::Esc => {
+            if let Some(responder) = pq.responder.take() {
+                let _ = responder.0.send("[cancelled]".to_string());
+            }
+            app.pending_question = None;
+            InputAction::None
+        }
+        KeyCode::Up => {
+            if pq.selected > 0 {
+                pq.selected -= 1;
+            }
+            InputAction::None
+        }
+        KeyCode::Down | KeyCode::Tab => {
+            let max = if pq.options.is_empty() {
+                0
+            } else {
+                pq.options.len()
+            };
+            if pq.selected < max {
+                pq.selected += 1;
+            }
+            InputAction::None
+        }
+        KeyCode::Enter => {
+            let answer = if pq.options.is_empty() || pq.selected >= pq.options.len() {
+                if pq.custom_input.is_empty() {
+                    "ok".to_string()
+                } else {
+                    pq.custom_input.clone()
+                }
+            } else {
+                pq.options[pq.selected].clone()
+            };
+            if let Some(responder) = pq.responder.take() {
+                let _ = responder.0.send(answer.clone());
+            }
+            app.pending_question = None;
+            InputAction::AnswerQuestion(answer)
+        }
+        KeyCode::Char(c) => {
+            pq.custom_input.push(c);
+            // Select custom input row
+            pq.selected = pq.options.len();
+            InputAction::None
+        }
+        KeyCode::Backspace => {
+            pq.custom_input.pop();
+            InputAction::None
+        }
+        _ => InputAction::None,
+    }
+}
+
+fn handle_permission_popup(app: &mut App, key: KeyEvent) -> InputAction {
+    let pp = app.pending_permission.as_mut().unwrap();
+    match key.code {
+        KeyCode::Esc => {
+            if let Some(responder) = pp.responder.take() {
+                let _ = responder.0.send("deny".to_string());
+            }
+            app.pending_permission = None;
+            InputAction::None
+        }
+        KeyCode::Up => {
+            if pp.selected > 0 {
+                pp.selected -= 1;
+            }
+            InputAction::None
+        }
+        KeyCode::Down | KeyCode::Tab => {
+            if pp.selected < 1 {
+                pp.selected += 1;
+            }
+            InputAction::None
+        }
+        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+            let answer = if pp.selected == 0 { "allow" } else { "deny" };
+            if let Some(responder) = pp.responder.take() {
+                let _ = responder.0.send(answer.to_string());
+            }
+            app.pending_permission = None;
+            InputAction::AnswerPermission(answer.to_string())
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') => {
+            if let Some(responder) = pp.responder.take() {
+                let _ = responder.0.send("deny".to_string());
+            }
+            app.pending_permission = None;
+            InputAction::AnswerPermission("deny".to_string())
+        }
+        _ => InputAction::None,
+    }
 }

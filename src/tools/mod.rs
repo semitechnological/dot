@@ -1,5 +1,9 @@
 pub mod file;
+pub mod glob;
+pub mod grep;
+pub mod patch;
 pub mod shell;
+pub mod web;
 
 use crate::provider::ToolDefinition;
 
@@ -80,6 +84,10 @@ impl ToolRegistry {
         registry.register(Box::new(file::ListDirectoryTool));
         registry.register(Box::new(file::SearchFilesTool));
         registry.register(Box::new(shell::RunCommandTool));
+        registry.register(Box::new(glob::GlobTool));
+        registry.register(Box::new(grep::GrepTool));
+        registry.register(Box::new(web::WebFetchTool));
+        registry.register(Box::new(patch::ApplyPatchTool));
         registry
     }
 }

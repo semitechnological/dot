@@ -16,6 +16,8 @@ pub struct Config {
     pub agents: HashMap<String, AgentConfig>,
     #[serde(default)]
     pub tui: TuiConfig,
+    #[serde(default)]
+    pub permissions: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +98,7 @@ impl Default for Config {
             mcp: HashMap::new(),
             agents: HashMap::new(),
             tui: TuiConfig::default(),
+            permissions: HashMap::new(),
         }
     }
 }

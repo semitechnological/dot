@@ -11,6 +11,14 @@ pub struct TodoItem {
     pub status: TodoStatus,
 }
 
+pub struct QuestionResponder(pub tokio::sync::oneshot::Sender<String>);
+
+impl std::fmt::Debug for QuestionResponder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("QuestionResponder")
+    }
+}
+
 use crate::provider::Usage;
 #[derive(Debug)]
 pub enum AgentEvent {
@@ -43,6 +51,17 @@ pub enum AgentEvent {
     },
     TitleGenerated(String),
     TodoUpdate(Vec<TodoItem>),
+    Question {
+        id: String,
+        question: String,
+        options: Vec<String>,
+        responder: QuestionResponder,
+    },
+    PermissionRequest {
+        tool_name: String,
+        input_summary: String,
+        responder: QuestionResponder,
+    },
 }
 
 pub(super) struct PendingToolCall {

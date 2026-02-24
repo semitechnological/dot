@@ -5,6 +5,12 @@ pub enum ToolCategory {
     Directory,
     Search,
     Command,
+    Glob,
+    Grep,
+    WebFetch,
+    Patch,
+    Snapshot,
+    Question,
     Mcp { server: String },
     Skill,
     Unknown,
@@ -18,11 +24,21 @@ impl ToolCategory {
             "list_directory" => Self::Directory,
             "search_files" => Self::Search,
             "run_command" => Self::Command,
+            "glob" => Self::Glob,
+            "grep" => Self::Grep,
+            "webfetch" => Self::WebFetch,
+            "apply_patch" => Self::Patch,
+            "snapshot_list" | "snapshot_restore" => Self::Snapshot,
+            "question" => Self::Question,
             "skill" => Self::Skill,
             other => {
                 if let Some(idx) = other.find('_') {
                     let prefix = &other[..idx];
-                    if !["read", "write", "list", "search", "run"].contains(&prefix) {
+                    if ![
+                        "read", "write", "list", "search", "run", "snapshot", "apply",
+                    ]
+                    .contains(&prefix)
+                    {
                         return Self::Mcp {
                             server: prefix.to_string(),
                         };
@@ -40,6 +56,12 @@ impl ToolCategory {
             Self::Directory => "\u{f07b} ",
             Self::Search => "\u{f002} ",
             Self::Command => "\u{f120} ",
+            Self::Glob => "\u{f002} ",
+            Self::Grep => "\u{f002} ",
+            Self::WebFetch => "\u{f0ac} ",
+            Self::Patch => "\u{270e} ",
+            Self::Snapshot => "\u{f0c2} ",
+            Self::Question => "\u{f128} ",
             Self::Mcp { .. } => "\u{f1e6} ",
             Self::Skill => "\u{f0eb} ",
             Self::Unknown => "\u{f013} ",
@@ -53,6 +75,12 @@ impl ToolCategory {
             Self::Directory => "list".to_string(),
             Self::Search => "search".to_string(),
             Self::Command => "run".to_string(),
+            Self::Glob => "glob".to_string(),
+            Self::Grep => "grep".to_string(),
+            Self::WebFetch => "fetch".to_string(),
+            Self::Patch => "patch".to_string(),
+            Self::Snapshot => "snapshot".to_string(),
+            Self::Question => "question".to_string(),
             Self::Mcp { server } => format!("mcp:{}", server),
             Self::Skill => "skill".to_string(),
             Self::Unknown => "tool".to_string(),
@@ -66,6 +94,12 @@ impl ToolCategory {
             Self::Directory => "listing",
             Self::Search => "searching",
             Self::Command => "running",
+            Self::Glob => "finding",
+            Self::Grep => "searching",
+            Self::WebFetch => "fetching",
+            Self::Patch => "patching",
+            Self::Snapshot => "checking",
+            Self::Question => "asking",
             Self::Mcp { .. } => "calling",
             Self::Skill => "loading",
             Self::Unknown => "running",
@@ -122,6 +156,56 @@ pub fn extract_tool_detail(name: &str, input: &str) -> String {
                     format!("{}...", &c[..57])
                 } else {
                     c.to_string()
+                }
+            })
+            .unwrap_or_default(),
+        "glob" => val
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "grep" => {
+            let pattern = val.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
+            let path = val.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if path.is_empty() {
+                format!("\"{}\"", pattern)
+            } else {
+                format!("\"{}\"; in {}", pattern, shorten_path(path))
+            }
+        }
+        "webfetch" => val
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|u| {
+                if u.len() > 60 {
+                    format!("{}...", &u[..57])
+                } else {
+                    u.to_string()
+                }
+            })
+            .unwrap_or_default(),
+        "apply_patch" => {
+            let count = val
+                .get("patches")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            format!("{} patches", count)
+        }
+        "snapshot_list" => "listing changes".to_string(),
+        "snapshot_restore" => val
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(shorten_path)
+            .unwrap_or_else(|| "all files".to_string()),
+        "question" => val
+            .get("question")
+            .and_then(|v| v.as_str())
+            .map(|q| {
+                if q.len() > 50 {
+                    format!("{}...", &q[..47])
+                } else {
+                    q.to_string()
                 }
             })
             .unwrap_or_default(),

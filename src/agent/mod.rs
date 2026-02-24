@@ -1,7 +1,7 @@
 mod events;
 mod profile;
 
-pub use events::{AgentEvent, TodoItem, TodoStatus};
+pub use events::{AgentEvent, QuestionResponder, TodoItem, TodoStatus};
 pub use profile::AgentProfile;
 
 use events::PendingToolCall;
@@ -11,6 +11,7 @@ use crate::db::Db;
 use crate::provider::{ContentBlock, Message, Provider, Role, StreamEventType, Usage};
 use crate::tools::ToolRegistry;
 use anyhow::Result;
+use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 
 const COMPACT_THRESHOLD: f32 = 0.8;
@@ -48,13 +49,15 @@ pub struct Agent {
     cwd: String,
     agents_context: crate::context::AgentsContext,
     last_input_tokens: u32,
+    permissions: HashMap<String, String>,
+    snapshots: crate::snapshot::SnapshotManager,
 }
 
 impl Agent {
     pub fn new(
         providers: Vec<Box<dyn Provider>>,
         db: Db,
-        _config: &Config,
+        config: &Config,
         tools: ToolRegistry,
         profiles: Vec<AgentProfile>,
         cwd: String,
@@ -82,6 +85,8 @@ impl Agent {
             cwd,
             agents_context,
             last_input_tokens: 0,
+            permissions: config.permissions.clone(),
+            snapshots: crate::snapshot::SnapshotManager::new(),
         })
     }
     fn provider(&self) -> &dyn Provider {
@@ -431,6 +436,37 @@ impl Agent {
                     "required": ["todos"]
                 }),
             });
+            tool_defs.push(crate::provider::ToolDefinition {
+                name: "question".to_string(),
+                description: "Ask the user a question and wait for their response. Use when you need clarification or a decision from the user.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "question": { "type": "string", "description": "The question to ask the user" },
+                        "options": { "type": "array", "items": { "type": "string" }, "description": "Optional list of choices" }
+                    },
+                    "required": ["question"]
+                }),
+            });
+            tool_defs.push(crate::provider::ToolDefinition {
+                name: "snapshot_list".to_string(),
+                description: "List all files that have been created or modified in this session."
+                    .to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                }),
+            });
+            tool_defs.push(crate::provider::ToolDefinition {
+                name: "snapshot_restore".to_string(),
+                description: "Restore a file to its original state before this session modified it. Pass a path or omit to restore all files.".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "File path to restore (omit to restore all)" }
+                    },
+                }),
+            });
             let mut stream_rx = self
                 .provider()
                 .stream(
@@ -548,6 +584,7 @@ impl Agent {
             for tc in &tool_calls {
                 let input_value: serde_json::Value =
                     serde_json::from_str(&tc.input).unwrap_or(serde_json::Value::Null);
+                // Virtual tool: todo_write
                 if tc.name == "todo_write" {
                     if let Some(todos_arr) = input_value.get("todos").and_then(|v| v.as_array()) {
                         let items: Vec<TodoItem> = todos_arr
@@ -581,6 +618,169 @@ impl Agent {
                     });
                     continue;
                 }
+                // Virtual tool: question
+                if tc.name == "question" {
+                    let question = input_value
+                        .get("question")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                        .to_string();
+                    let options: Vec<String> = input_value
+                        .get("options")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let _ = event_tx.send(AgentEvent::Question {
+                        id: tc.id.clone(),
+                        question: question.clone(),
+                        options,
+                        responder: QuestionResponder(tx),
+                    });
+                    let answer = match rx.await {
+                        Ok(a) => a,
+                        Err(_) => "[cancelled]".to_string(),
+                    };
+                    let _ = event_tx.send(AgentEvent::ToolCallResult {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        output: answer.clone(),
+                        is_error: false,
+                    });
+                    result_blocks.push(ContentBlock::ToolResult {
+                        tool_use_id: tc.id.clone(),
+                        content: answer,
+                        is_error: false,
+                    });
+                    continue;
+                }
+                // Virtual tool: snapshot_list
+                if tc.name == "snapshot_list" {
+                    let changes = self.snapshots.list_changes();
+                    let output = if changes.is_empty() {
+                        "No file changes in this session.".to_string()
+                    } else {
+                        changes
+                            .iter()
+                            .map(|(p, k)| format!("{} {}", k.icon(), p))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    let _ = event_tx.send(AgentEvent::ToolCallResult {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        output: output.clone(),
+                        is_error: false,
+                    });
+                    result_blocks.push(ContentBlock::ToolResult {
+                        tool_use_id: tc.id.clone(),
+                        content: output,
+                        is_error: false,
+                    });
+                    continue;
+                }
+                // Virtual tool: snapshot_restore
+                if tc.name == "snapshot_restore" {
+                    let output =
+                        if let Some(path) = input_value.get("path").and_then(|v| v.as_str()) {
+                            match self.snapshots.restore(path) {
+                                Ok(msg) => msg,
+                                Err(e) => e.to_string(),
+                            }
+                        } else {
+                            match self.snapshots.restore_all() {
+                                Ok(msgs) => {
+                                    if msgs.is_empty() {
+                                        "Nothing to restore.".to_string()
+                                    } else {
+                                        msgs.join("\n")
+                                    }
+                                }
+                                Err(e) => e.to_string(),
+                            }
+                        };
+                    let _ = event_tx.send(AgentEvent::ToolCallResult {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        output: output.clone(),
+                        is_error: false,
+                    });
+                    result_blocks.push(ContentBlock::ToolResult {
+                        tool_use_id: tc.id.clone(),
+                        content: output,
+                        is_error: false,
+                    });
+                    continue;
+                }
+                // Permission check
+                let perm = self
+                    .permissions
+                    .get(&tc.name)
+                    .map(|s| s.as_str())
+                    .unwrap_or("allow");
+                if perm == "deny" {
+                    let output = format!("Tool '{}' is denied by permissions config.", tc.name);
+                    let _ = event_tx.send(AgentEvent::ToolCallResult {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        output: output.clone(),
+                        is_error: true,
+                    });
+                    result_blocks.push(ContentBlock::ToolResult {
+                        tool_use_id: tc.id.clone(),
+                        content: output,
+                        is_error: true,
+                    });
+                    continue;
+                }
+                if perm == "ask" {
+                    let summary = format!("{}: {}", tc.name, &tc.input[..tc.input.len().min(100)]);
+                    let (ptx, prx) = tokio::sync::oneshot::channel();
+                    let _ = event_tx.send(AgentEvent::PermissionRequest {
+                        tool_name: tc.name.clone(),
+                        input_summary: summary,
+                        responder: QuestionResponder(ptx),
+                    });
+                    let answer = match prx.await {
+                        Ok(a) => a,
+                        Err(_) => "deny".to_string(),
+                    };
+                    if answer != "allow" {
+                        let output = format!("Tool '{}' denied by user.", tc.name);
+                        let _ = event_tx.send(AgentEvent::ToolCallResult {
+                            id: tc.id.clone(),
+                            name: tc.name.clone(),
+                            output: output.clone(),
+                            is_error: true,
+                        });
+                        result_blocks.push(ContentBlock::ToolResult {
+                            tool_use_id: tc.id.clone(),
+                            content: output,
+                            is_error: true,
+                        });
+                        continue;
+                    }
+                }
+                // Snapshot before file writes
+                if tc.name == "write_file" || tc.name == "apply_patch" {
+                    if tc.name == "write_file" {
+                        if let Some(path) = input_value.get("path").and_then(|v| v.as_str()) {
+                            self.snapshots.before_write(path);
+                        }
+                    } else if let Some(patches) =
+                        input_value.get("patches").and_then(|v| v.as_array())
+                    {
+                        for patch in patches {
+                            if let Some(path) = patch.get("path").and_then(|v| v.as_str()) {
+                                self.snapshots.before_write(path);
+                            }
+                        }
+                    }
+                }
                 let _ = event_tx.send(AgentEvent::ToolCallExecuting {
                     id: tc.id.clone(),
                     name: tc.name.clone(),
@@ -588,7 +788,6 @@ impl Agent {
                 });
                 let tool_name = tc.name.clone();
                 let tool_input = input_value.clone();
-
                 let exec_result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
                     tokio::task::block_in_place(|| self.tools.execute(&tool_name, tool_input))
                 })

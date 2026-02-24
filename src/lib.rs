@@ -7,5 +7,6 @@ pub mod db;
 pub mod mcp;
 pub mod provider;
 pub mod skills;
+pub mod snapshot;
 pub mod tools;
 pub mod tui;

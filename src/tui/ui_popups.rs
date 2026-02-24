@@ -664,3 +664,158 @@ pub fn draw_context_menu(frame: &mut Frame, app: &mut App) {
 
     frame.render_widget(Paragraph::new(lines), inner);
 }
+
+pub fn draw_question_popup(frame: &mut Frame, app: &mut App) {
+    let pq = match app.pending_question.as_ref() {
+        Some(q) => q,
+        None => return,
+    };
+
+    let mut content_lines: Vec<Line<'static>> = Vec::new();
+    content_lines.push(Line::from(Span::styled(
+        format!(" {}", pq.question),
+        Style::default().fg(Color::Reset),
+    )));
+    content_lines.push(Line::from(""));
+
+    for (i, opt) in pq.options.iter().enumerate() {
+        let is_sel = i == pq.selected;
+        let (prefix, style) = if is_sel {
+            (
+                "\u{25b8} ",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            ("  ", Style::default().fg(Color::Reset))
+        };
+        content_lines.push(Line::from(Span::styled(
+            format!("  {}{}", prefix, opt),
+            style,
+        )));
+    }
+
+    // Custom input row
+    let custom_sel = pq.selected >= pq.options.len();
+    let custom_style = if custom_sel {
+        Style::default()
+            .fg(app.theme.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        app.theme.dim
+    };
+    let custom_text = if pq.custom_input.is_empty() {
+        "type your answer\u{2026}".to_string()
+    } else {
+        format!("{}\u{258f}", pq.custom_input)
+    };
+    content_lines.push(Line::from(vec![
+        Span::styled(
+            if custom_sel { "  \u{25b8} " } else { "    " },
+            if custom_sel {
+                Style::default().fg(app.theme.accent)
+            } else {
+                Style::default()
+            },
+        ),
+        Span::styled(custom_text, custom_style),
+    ]));
+
+    let footer = "\u{2191}\u{2193} select  enter confirm  esc cancel";
+    let content_width = content_lines
+        .iter()
+        .map(|l| l.width())
+        .max()
+        .unwrap_or(30)
+        .max(footer.len() + 2)
+        + 4;
+    let content_height = content_lines.len() + 3;
+
+    let popup = centered_popup(frame.area(), content_width, content_height);
+    app.layout.question_popup = Some(popup);
+
+    frame.render_widget(Clear, popup);
+
+    let block = popup_block("question", app.theme.accent, app.theme.muted_fg);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let mut all_lines: Vec<Line<'static>> = Vec::new();
+    all_lines.extend(content_lines);
+    all_lines.push(Line::from(""));
+    all_lines.push(Line::from(Span::styled(
+        format!(" {}", footer),
+        app.theme.dim,
+    )));
+
+    frame.render_widget(Paragraph::new(all_lines), inner);
+}
+
+pub fn draw_permission_popup(frame: &mut Frame, app: &mut App) {
+    let pp = match app.pending_permission.as_ref() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let mut content_lines: Vec<Line<'static>> = Vec::new();
+    content_lines.push(Line::from(Span::styled(
+        format!(" Allow {}?", pp.tool_name),
+        Style::default()
+            .fg(Color::Reset)
+            .add_modifier(Modifier::BOLD),
+    )));
+    content_lines.push(Line::from(Span::styled(
+        format!(" {}", &pp.input_summary[..pp.input_summary.len().min(60)]),
+        app.theme.dim,
+    )));
+    content_lines.push(Line::from(""));
+
+    let labels = ["Allow", "Deny"];
+    for (i, label) in labels.iter().enumerate() {
+        let is_sel = i == pp.selected;
+        let (prefix, style) = if is_sel {
+            (
+                "\u{25b8} ",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            ("  ", Style::default().fg(Color::Reset))
+        };
+        content_lines.push(Line::from(Span::styled(
+            format!("  {}{}", prefix, label),
+            style,
+        )));
+    }
+
+    let footer = "y allow  n deny  esc cancel";
+    let content_width = content_lines
+        .iter()
+        .map(|l| l.width())
+        .max()
+        .unwrap_or(30)
+        .max(footer.len() + 2)
+        + 4;
+    let content_height = content_lines.len() + 3;
+
+    let popup = centered_popup(frame.area(), content_width, content_height);
+    app.layout.permission_popup = Some(popup);
+
+    frame.render_widget(Clear, popup);
+
+    let block = popup_block("permission", app.theme.accent, app.theme.muted_fg);
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let mut all_lines: Vec<Line<'static>> = Vec::new();
+    all_lines.extend(content_lines);
+    all_lines.push(Line::from(""));
+    all_lines.push(Line::from(Span::styled(
+        format!(" {}", footer),
+        app.theme.dim,
+    )));
+
+    frame.render_widget(Paragraph::new(all_lines), inner);
+}

@@ -10,6 +10,7 @@ pub mod ui_tools;
 pub mod widgets;
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::Result;
 use crossterm::{execute, terminal};
@@ -189,6 +190,28 @@ async fn run_app(
                                 app.is_streaming = false;
                             }
                             agent_rx = None;
+                            if let Some(queued) = app.message_queue.pop_front() {
+                                let (tx, rx) = mpsc::unbounded_channel();
+                                agent_rx = Some(rx);
+                                app.is_streaming = true;
+                                app.streaming_started = Some(Instant::now());
+                                app.current_response.clear();
+                                app.current_thinking.clear();
+                                app.current_tool_calls.clear();
+                                app.error_message = None;
+                                let agent_clone = Arc::clone(&agent);
+                                tokio::spawn(async move {
+                                    let mut agent = agent_clone.lock().await;
+                                    let result = if queued.images.is_empty() {
+                                        agent.send_message(&queued.text, tx).await
+                                    } else {
+                                        agent.send_message_with_images(&queued.text, queued.images, tx).await
+                                    };
+                                    if let Err(e) = result {
+                                        tracing::error!("Agent send_message error: {}", e);
+                                    }
+                                });
+                            }
                         }
                     }
                     continue;
@@ -261,6 +284,9 @@ async fn dispatch_action(
                 app.current_tool_calls.clear();
             }
             app.pending_tool_name = None;
+            // Drop pending question/permission to unblock agent
+            app.pending_question = None;
+            app.pending_permission = None;
             app.error_message = Some("cancelled".to_string());
             return LoopSignal::CancelStream;
         }
@@ -470,7 +496,17 @@ async fn dispatch_action(
                 }
             }
         }
-        InputAction::None => {}
+        InputAction::AnswerQuestion(answer) => {
+            app.messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: answer,
+                tool_calls: Vec::new(),
+                thinking: None,
+                model: None,
+            });
+            app.scroll_to_bottom();
+        }
+        InputAction::AnswerPermission(_) | InputAction::None => {}
     }
     LoopSignal::Continue
 }

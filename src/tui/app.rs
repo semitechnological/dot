@@ -1,9 +1,10 @@
+use std::collections::VecDeque;
 use std::path::Path;
 use std::time::Instant;
 
 use ratatui::layout::Rect;
 
-use crate::agent::{AgentEvent, TodoItem};
+use crate::agent::{AgentEvent, QuestionResponder, TodoItem};
 use crate::tui::theme::Theme;
 use crate::tui::tools::{ToolCallDisplay, ToolCategory, extract_tool_detail};
 use crate::tui::widgets::{
@@ -116,6 +117,28 @@ pub fn is_image_path(path: &str) -> bool {
 
 pub const PASTE_COLLAPSE_THRESHOLD: usize = 5;
 
+#[derive(Debug)]
+pub struct PendingQuestion {
+    pub question: String,
+    pub options: Vec<String>,
+    pub selected: usize,
+    pub custom_input: String,
+    pub responder: Option<QuestionResponder>,
+}
+
+#[derive(Debug)]
+pub struct PendingPermission {
+    pub tool_name: String,
+    pub input_summary: String,
+    pub selected: usize,
+    pub responder: Option<QuestionResponder>,
+}
+
+pub struct QueuedMessage {
+    pub text: String,
+    pub images: Vec<(String, String)>,
+}
+
 #[derive(PartialEq, Clone, Copy)]
 pub enum AppMode {
     Normal,
@@ -135,6 +158,8 @@ pub struct LayoutRects {
     pub session_selector: Option<Rect>,
     pub help_popup: Option<Rect>,
     pub context_menu: Option<Rect>,
+    pub question_popup: Option<Rect>,
+    pub permission_popup: Option<Rect>,
 }
 
 pub struct App {
@@ -191,6 +216,9 @@ pub struct App {
     pub todos: Vec<TodoItem>,
     pub message_line_map: Vec<usize>,
     pub context_menu: MessageContextMenu,
+    pub pending_question: Option<PendingQuestion>,
+    pub pending_permission: Option<PendingPermission>,
+    pub message_queue: VecDeque<QueuedMessage>,
 }
 
 impl App {
@@ -250,6 +278,9 @@ impl App {
             todos: Vec::new(),
             message_line_map: Vec::new(),
             context_menu: MessageContextMenu::new(),
+            pending_question: None,
+            pending_permission: None,
+            message_queue: VecDeque::new(),
         }
     }
 
@@ -360,6 +391,32 @@ impl App {
             AgentEvent::TodoUpdate(items) => {
                 self.todos = items;
             }
+            AgentEvent::Question {
+                question,
+                options,
+                responder,
+                ..
+            } => {
+                self.pending_question = Some(PendingQuestion {
+                    question,
+                    options,
+                    selected: 0,
+                    custom_input: String::new(),
+                    responder: Some(responder),
+                });
+            }
+            AgentEvent::PermissionRequest {
+                tool_name,
+                input_summary,
+                responder,
+            } => {
+                self.pending_permission = Some(PendingPermission {
+                    tool_name,
+                    input_summary,
+                    selected: 0,
+                    responder: Some(responder),
+                });
+            }
         }
     }
 
@@ -411,8 +468,55 @@ impl App {
         std::mem::take(&mut self.attachments)
     }
 
+    pub fn queue_input(&mut self) -> bool {
+        let trimmed = self.input.trim().to_string();
+        if trimmed.is_empty() && self.attachments.is_empty() {
+            return false;
+        }
+        let display = if self.attachments.is_empty() {
+            trimmed.clone()
+        } else {
+            let names: Vec<String> = self
+                .attachments
+                .iter()
+                .map(|a| {
+                    Path::new(&a.path)
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_else(|| a.path.clone())
+                })
+                .collect();
+            if trimmed.is_empty() {
+                format!("[{}]", names.join(", "))
+            } else {
+                format!("{} [{}]", trimmed, names.join(", "))
+            }
+        };
+        self.messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: display,
+            tool_calls: Vec::new(),
+            thinking: None,
+            model: None,
+        });
+        let images: Vec<(String, String)> = self
+            .attachments
+            .drain(..)
+            .map(|a| (a.media_type, a.data))
+            .collect();
+        self.message_queue.push_back(QueuedMessage {
+            text: trimmed,
+            images,
+        });
+        self.input.clear();
+        self.cursor_pos = 0;
+        self.paste_blocks.clear();
+        self.scroll_to_bottom();
+        true
+    }
+
     pub fn input_height(&self) -> u16 {
-        if self.is_streaming {
+        if self.is_streaming && self.input.is_empty() && self.attachments.is_empty() {
             return 3;
         }
         let lines = if self.input.is_empty() {
@@ -592,6 +696,9 @@ impl App {
         self.message_line_map.clear();
         self.esc_hint_until = None;
         self.context_menu.close();
+        self.pending_question = None;
+        self.pending_permission = None;
+        self.message_queue.clear();
     }
 
     pub fn insert_char(&mut self, c: char) {

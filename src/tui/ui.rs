@@ -67,6 +67,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.context_menu.visible {
         ui_popups::draw_context_menu(frame, app);
     }
+
+    if app.pending_question.is_some() {
+        ui_popups::draw_question_popup(frame, app);
+    }
+
+    if app.pending_permission.is_some() {
+        ui_popups::draw_permission_popup(frame, app);
+    }
 }
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
@@ -472,21 +480,24 @@ fn render_thinking_block(
 }
 
 fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
-    let is_active = (!app.vim_mode || app.mode == AppMode::Insert) && !app.is_streaming;
+    let can_edit = !app.vim_mode || app.mode == AppMode::Insert;
+    let has_input = !app.input.is_empty() || !app.attachments.is_empty();
 
-    let border_style = if is_active {
+    let border_style = if can_edit && !app.is_streaming {
         Style::default().fg(app.theme.accent)
+    } else if can_edit && app.is_streaming {
+        Style::default().fg(app.theme.muted_fg)
     } else {
         app.theme.border
     };
-
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(border_style);
-
     let inner = block.inner(area);
 
-    let (prompt, prompt_style) = if is_active {
+    let (prompt, prompt_style) = if app.is_streaming && can_edit {
+        ("\u{25c7} ", Style::default().fg(app.theme.accent))
+    } else if can_edit {
         (
             "\u{25c6} ",
             Style::default()
@@ -497,13 +508,12 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         ("\u{25c7} ", Style::default().fg(app.theme.muted_fg))
     };
 
-    let display_lines: Vec<Line<'static>> = if app.is_streaming {
+    let display_lines: Vec<Line<'static>> = if app.is_streaming && !has_input {
         let pulse = ["\u{25c7}", "\u{25c6}"];
         let idx = (app.tick_count / 20 % pulse.len() as u64) as usize;
 
         let dot_count = ((app.tick_count / 16) % 4) as usize;
         let dots: String = ".".repeat(dot_count);
-
         let mut spans = vec![
             Span::styled(
                 format!("  {} ", pulse[idx]),
@@ -517,8 +527,14 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
                 app.theme.dim,
             ));
         }
+        if !app.message_queue.is_empty() {
+            spans.push(Span::styled(
+                format!(" \u{00b7} {} queued", app.message_queue.len()),
+                Style::default().fg(app.theme.accent),
+            ));
+        }
         vec![Line::from(spans)]
-    } else if app.input.is_empty() && app.attachments.is_empty() {
+    } else if !has_input {
         vec![Line::from(vec![
             Span::styled(prompt, prompt_style),
             Span::styled("message or /help", app.theme.dim),
@@ -544,7 +560,6 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
                 ),
             ]));
         }
-
         let display = app.display_input();
         if display.is_empty() && !app.attachments.is_empty() {
             if lines.is_empty() {
@@ -557,10 +572,17 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
             let offset = if app.attachments.is_empty() { 0 } else { 1 };
             for (i, line) in display.lines().enumerate() {
                 if i == 0 && offset == 0 {
-                    lines.push(Line::from(vec![
+                    let mut spans = vec![
                         Span::styled(prompt, prompt_style),
                         Span::raw(line.to_string()),
-                    ]));
+                    ];
+                    if app.is_streaming && !app.message_queue.is_empty() {
+                        spans.push(Span::styled(
+                            format!(" ({} queued)", app.message_queue.len()),
+                            app.theme.dim,
+                        ));
+                    }
+                    lines.push(Line::from(spans));
                 } else {
                     lines.push(Line::from(vec![
                         Span::raw("  "),
@@ -576,11 +598,9 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let paragraph = Paragraph::new(display_lines).wrap(Wrap { trim: false });
-
     frame.render_widget(block, area);
     frame.render_widget(paragraph, inner);
-
-    if is_active && !app.model_selector.visible {
+    if can_edit && !app.model_selector.visible {
         let blink_on = (app.tick_count / 32).is_multiple_of(2);
         if blink_on {
             let (cx, cy) = cursor_position(&app.input, app.cursor_pos, inner);
@@ -644,6 +664,15 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
             new_label,
             Style::default().fg(app.theme.accent),
         ));
+    }
+
+    if !app.message_queue.is_empty() {
+        let q_label = if compact {
+            format!(" {}q", app.message_queue.len())
+        } else {
+            format!(" \u{00b7} {} queued", app.message_queue.len())
+        };
+        left_spans.push(Span::styled(q_label, Style::default().fg(app.theme.accent)));
     }
 
     let left_width: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();

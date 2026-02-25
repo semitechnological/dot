@@ -56,7 +56,7 @@ pub fn render_markdown(text: &str, theme: &Theme, width: u16) -> Vec<Line<'stati
     for raw_line in text.lines() {
         if raw_line.starts_with("```") {
             if in_code_block {
-                render_code_block(&code_lang, &code_lines, theme, &mut lines);
+                render_code_block(&code_lang, &code_lines, theme, width, &mut lines);
                 code_lines.clear();
                 code_lang.clear();
                 in_code_block = false;
@@ -159,7 +159,7 @@ pub fn render_markdown(text: &str, theme: &Theme, width: u16) -> Vec<Line<'stati
     }
 
     if in_code_block {
-        render_code_block(&code_lang, &code_lines, theme, &mut lines);
+        render_code_block(&code_lang, &code_lines, theme, width, &mut lines);
     }
 
     let mut deduped: Vec<Line<'static>> = Vec::with_capacity(lines.len());
@@ -179,35 +179,57 @@ fn render_code_block(
     lang: &str,
     code_lines: &[String],
     theme: &Theme,
+    width: u16,
     output: &mut Vec<Line<'static>>,
 ) {
-    let label = if lang.is_empty() {
-        String::new()
-    } else {
-        format!(" {} ", lang)
+    let w = width as usize;
+    let bg = theme.code_bg;
+    let pad = "  ";
+    let pad_len = 2;
+
+    // Helper: pad a line to full width with bg fill
+    let fill = |content_len: usize| -> String {
+        " ".repeat(w.saturating_sub(content_len))
     };
-    if !label.is_empty() {
-        output.push(Line::from(Span::styled(label, theme.dim)));
+
+    // Top line: language badge or blank, all on code_bg
+    if !lang.is_empty() {
+        let badge = format!("{}{}", pad, lang);
+        let badge_len = badge.chars().count();
+        output.push(Line::from(vec![
+            Span::styled(badge, Style::default().fg(theme.muted_fg).bg(bg)),
+            Span::styled(fill(badge_len), Style::default().bg(bg)),
+        ]));
+    } else {
+        output.push(Line::from(Span::styled(
+            " ".repeat(w),
+            Style::default().bg(bg),
+        )));
     }
 
     let is_diff = lang == "diff" || lang == "patch";
     if is_diff {
         for line in code_lines {
-            let style = if line.starts_with('+') {
-                theme.diff_add.bg(theme.code_bg)
+            let diff_style = if line.starts_with('+') {
+                theme.diff_add.bg(bg)
             } else if line.starts_with('-') {
-                theme.diff_remove.bg(theme.code_bg)
+                theme.diff_remove.bg(bg)
             } else if line.starts_with('@') {
-                theme.diff_hunk.bg(theme.code_bg)
+                theme.diff_hunk.bg(bg)
             } else {
-                Style::default().fg(theme.fg).bg(theme.code_bg)
+                Style::default().fg(theme.fg).bg(bg)
             };
-            output.push(Line::from(Span::styled(format!("  {}", line), style)));
+            let content = format!("{}{}", pad, line);
+            let content_len = content.chars().count();
+            output.push(Line::from(vec![
+                Span::styled(content, diff_style),
+                Span::styled(fill(content_len), Style::default().bg(bg)),
+            ]));
         }
         if code_lines.is_empty() {
             output.push(Line::from(Span::styled(
-                "  ",
-                Style::default().bg(theme.code_bg),
+                " ".repeat(w),
+                Style::default().bg(bg),
             )));
         }
     } else if let Some(syntect_theme_name) = theme.syntect_theme
@@ -220,41 +242,60 @@ fn render_code_block(
             let highlighted = highlighter.highlight_line(line, &SYNTAX_SET);
             match highlighted {
                 Ok(ranges) => {
-                    let mut spans = vec![Span::styled("  ", Style::default().bg(theme.code_bg))];
+                    let mut spans = vec![Span::styled(pad, Style::default().bg(bg))];
+                    let mut content_len = pad_len;
                     for (style, text) in ranges {
                         let fg = style.foreground;
+                        content_len += text.chars().count();
                         spans.push(Span::styled(
                             text.to_string(),
                             Style::default()
                                 .fg(Color::Rgb(fg.r, fg.g, fg.b))
-                                .bg(theme.code_bg),
+                                .bg(bg),
                         ));
                     }
+                    spans.push(Span::styled(fill(content_len), Style::default().bg(bg)));
                     output.push(Line::from(spans));
                 }
                 Err(_) => {
-                    output.push(Line::from(Span::styled(
-                        format!("  {}", line),
-                        Style::default().fg(theme.fg).bg(theme.code_bg),
-                    )));
+                    let content = format!("{}{}", pad, line);
+                    let content_len = content.chars().count();
+                    output.push(Line::from(vec![
+                        Span::styled(content, Style::default().fg(theme.fg).bg(bg)),
+                        Span::styled(fill(content_len), Style::default().bg(bg)),
+                    ]));
                 }
             }
         }
         if code_lines.is_empty() {
             output.push(Line::from(Span::styled(
-                "  ",
-                Style::default().bg(theme.code_bg),
+                " ".repeat(w),
+                Style::default().bg(bg),
             )));
         }
     } else {
-        let code_style = Style::default().fg(theme.fg).bg(theme.code_bg);
+        let code_style = Style::default().fg(theme.fg).bg(bg);
         for line in code_lines {
-            output.push(Line::from(Span::styled(format!("  {}", line), code_style)));
+            let content = format!("{}{}", pad, line);
+            let content_len = content.chars().count();
+            output.push(Line::from(vec![
+                Span::styled(content, code_style),
+                Span::styled(fill(content_len), Style::default().bg(bg)),
+            ]));
         }
         if code_lines.is_empty() {
-            output.push(Line::from(Span::styled("  ", code_style)));
+            output.push(Line::from(Span::styled(
+                " ".repeat(w),
+                Style::default().bg(bg),
+            )));
         }
     }
+
+    // Bottom padding line on code_bg
+    output.push(Line::from(Span::styled(
+        " ".repeat(w),
+        Style::default().bg(bg),
+    )));
 }
 
 #[allow(clippy::while_let_on_iterator)]

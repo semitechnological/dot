@@ -293,17 +293,9 @@ pub fn draw_empty_state(app: &App, width: u16) -> Vec<Line<'static>> {
     let muted = app.theme.muted_fg;
     let compact = width < 55;
     let pad = if compact { "   " } else { "       " };
-    let sep_width = if compact {
-        (width as usize).saturating_sub(6).min(24)
-    } else {
-        32
-    };
-    let sep_line = Line::from(Span::styled(
-        format!("{}{}", pad, "\u{2500}".repeat(sep_width)),
-        border_style,
-    ));
 
     let mut lines = vec![
+        Line::from(""),
         Line::from(""),
         Line::from(""),
         Line::from(Span::styled(
@@ -315,34 +307,47 @@ pub fn draw_empty_state(app: &App, width: u16) -> Vec<Line<'static>> {
             format!("{}dot", pad),
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         )),
-        Line::from(""),
-        sep_line,
+        Line::from(Span::styled(
+            format!("{}a terminal-native ai agent", pad),
+            dim,
+        )),
         Line::from(""),
     ];
 
     if compact {
         lines.push(Line::from(Span::styled(
-            format!("{}type a message to start", pad),
-            dim,
-        )));
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            format!("{}/help  /model  /sessions", pad),
+            format!("{}type a message to begin", pad),
             Style::default().fg(muted),
-        )));
-    } else {
-        lines.push(Line::from(Span::styled(
-            format!("{}type a message to get started", pad),
-            dim,
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
-            Span::styled(format!("{}/help", pad), Style::default().fg(muted)),
-            Span::styled("  \u{00b7}  ", dim),
-            Span::styled("/model", Style::default().fg(muted)),
-            Span::styled("  \u{00b7}  ", dim),
-            Span::styled("/sessions", Style::default().fg(muted)),
+            Span::styled(format!("{}  /help", pad), dim),
+            Span::styled("  /model", dim),
+            Span::styled("  /sessions", dim),
         ]));
+    } else {
+        let sep_width = 28usize.min((width as usize).saturating_sub(8));
+        let sep = "\u{2500}".repeat(sep_width);
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", pad, sep),
+            border_style,
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("{}type a message to begin", pad),
+            Style::default().fg(muted),
+        )));
+        lines.push(Line::from(""));
+        for (key, desc) in [
+            ("/help", "commands & keybindings"),
+            ("/model", "switch model"),
+            ("/sessions", "resume a conversation"),
+        ] {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{}  {:<12}", pad, key), Style::default().fg(muted)),
+                Span::styled(desc, dim),
+            ]));
+        }
     }
 
     lines.push(Line::from(""));

@@ -37,10 +37,15 @@ fn render_tool_calls_inner(
     for tc in tool_calls {
         let cat_style = tool_category_style(&tc.category, theme);
         let label = tc.category.label();
-        let err_style = if tc.is_error { theme.error } else { cat_style };
+        let (status_icon, status_style) = if tc.is_error {
+            ("\u{2717}", theme.tool_exit_err)
+        } else {
+            ("\u{2713}", theme.tool_exit_ok)
+        };
+        let label_style = if tc.is_error { theme.error } else { cat_style };
         let mut header_spans = vec![
-            Span::styled(format!("{}  ", hdr_pad), err_style),
-            Span::styled(format!("{:<6}", label), err_style),
+            Span::styled(format!("{}{} ", hdr_pad, status_icon), status_style),
+            Span::styled(format!("{:<6}", label), label_style),
         ];
 
         if !tc.detail.is_empty() {
@@ -213,11 +218,11 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
         let detail = extract_tool_detail(tool_name, &app.pending_tool_input);
 
         let cat_style = tool_category_style(&category, &app.theme);
-        let dots = ["\u{00b7}", "\u{2022}", "\u{25cf}", "\u{2022}"];
-        let idx = (app.tick_count / 10 % dots.len() as u64) as usize;
+        let frames = ["\u{25cb}", "\u{25d4}", "\u{25d1}", "\u{25d5}", "\u{25cf}", "\u{25d5}", "\u{25d1}", "\u{25d4}"];
+        let idx = (app.tick_count / 8 % frames.len() as u64) as usize;
         let intent = category.intent();
         let mut tool_spans = vec![
-            Span::styled(format!("{}{} ", pad, dots[idx]), cat_style),
+            Span::styled(format!("{}{} ", pad, frames[idx]), cat_style),
             Span::styled(format!("{} ", intent), cat_style),
         ];
 
@@ -245,6 +250,14 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
             tool_spans.push(Span::styled(tool_name.to_string(), app.theme.tool_name));
         }
 
+        if has_completed_tools {
+            let n = app.current_tool_calls.len();
+            tool_spans.push(Span::styled(
+                format!(" \u{00b7} {} done", n),
+                app.theme.dim,
+            ));
+        }
+
         if let Some(elapsed) = app.streaming_elapsed_secs() {
             tool_spans.push(Span::styled(
                 format!(" \u{00b7} {}", super::ui::format_elapsed(elapsed)),
@@ -255,11 +268,12 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
         lines.push(Line::from(tool_spans));
     } else if !has_completed_tools {
         lines.push(Line::from(""));
-        let dots = ["\u{00b7}", "\u{2022}", "\u{25cf}", "\u{2022}"];
-        let idx = (app.tick_count / 10 % dots.len() as u64) as usize;
+        lines.push(Line::from(model_header.clone()));
+        let frames = ["\u{25cb}", "\u{25d4}", "\u{25d1}", "\u{25d5}", "\u{25cf}", "\u{25d5}", "\u{25d1}", "\u{25d4}"];
+        let idx = (app.tick_count / 8 % frames.len() as u64) as usize;
         let has_live_thinking = !app.current_thinking.is_empty();
         let mut thinking_spans = vec![
-            Span::styled(format!("{}{} ", pad, dots[idx]), app.theme.thinking),
+            Span::styled(format!("{}{} ", pad, frames[idx]), app.theme.thinking),
             Span::styled(
                 "thinking",
                 ratatui::style::Style::default()

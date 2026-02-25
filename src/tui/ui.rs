@@ -210,6 +210,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             &app.theme,
             app.thinking_expanded,
             inner.width,
+            area.width,
             &mut all_lines,
         );
         let after = all_lines.len();
@@ -344,6 +345,7 @@ fn render_message(
     theme: &Theme,
     thinking_expanded: bool,
     inner_width: u16,
+    render_width: u16,
     lines: &mut Vec<Line<'static>>,
 ) {
     let compact = inner_width < 55;
@@ -430,8 +432,22 @@ fn render_message(
                 inner_width.saturating_sub(body_indent_cols),
             );
             for line in md_lines {
-                let mut padded = vec![Span::raw(body_indent)];
+                let bg = line.spans.first().and_then(|s| s.style.bg);
+                let indent_style = bg
+                    .map(|c| Style::default().bg(c))
+                    .unwrap_or_default();
+                let mut padded = vec![Span::styled(body_indent, indent_style)];
                 padded.extend(line.spans);
+                if let Some(bg_color) = bg {
+                    let used: usize = padded.iter().map(|s| s.content.chars().count()).sum();
+                    let target = render_width as usize;
+                    if used < target {
+                        padded.push(Span::styled(
+                            " ".repeat(target - used),
+                            Style::default().bg(bg_color),
+                        ));
+                    }
+                }
                 lines.push(Line::from(padded));
             }
         }

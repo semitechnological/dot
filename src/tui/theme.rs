@@ -126,7 +126,7 @@ impl Theme {
             border: Style::default().fg(surface),
             input_prompt: Style::default().fg(accent),
             status_bar: Style::default().fg(muted),
-            code_bg: base,
+            code_bg: surface,
             inline_code: Style::default().fg(peach),
             error: Style::default().fg(red),
             tool_name: Style::default().fg(yellow).add_modifier(Modifier::BOLD),
@@ -183,7 +183,6 @@ impl Theme {
         let yellow = Color::Rgb(223, 142, 29);
         let teal = Color::Rgb(23, 146, 153);
         let sapphire = Color::Rgb(32, 159, 181);
-        let base = Color::Rgb(239, 241, 245);
         let text = Color::Rgb(76, 79, 105);
 
         Self {
@@ -197,7 +196,7 @@ impl Theme {
             border: Style::default().fg(surface),
             input_prompt: Style::default().fg(accent),
             status_bar: Style::default().fg(muted),
-            code_bg: base,
+            code_bg: surface,
             inline_code: Style::default().fg(peach),
             error: Style::default().fg(red),
             tool_name: Style::default().fg(yellow).add_modifier(Modifier::BOLD),
@@ -264,7 +263,7 @@ impl Theme {
             border: dim,
             input_prompt: bold,
             status_bar: dim,
-            code_bg: Color::Reset,
+            code_bg: Color::Indexed(0),
             inline_code: Style::default().fg(yellow),
             error: Style::default().fg(red),
             tool_name: Style::default().add_modifier(Modifier::BOLD),

@@ -18,6 +18,14 @@ pub struct Config {
     pub tui: TuiConfig,
     #[serde(default)]
     pub permissions: HashMap<String, String>,
+    #[serde(default)]
+    pub providers: HashMap<String, ProviderDefinition>,
+    #[serde(default)]
+    pub custom_tools: HashMap<String, CustomToolConfig>,
+    #[serde(default)]
+    pub commands: HashMap<String, CommandConfig>,
+    #[serde(default)]
+    pub hooks: HashMap<String, HookConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,12 +85,58 @@ impl Default for TuiConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderDefinition {
+    pub api: String,
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub models: Vec<String>,
+    pub default_model: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomToolConfig {
+    pub description: String,
+    pub command: String,
+    #[serde(default = "default_schema")]
+    pub schema: serde_json::Value,
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandConfig {
+    pub description: String,
+    pub command: String,
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookConfig {
+    pub command: String,
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
 fn default_true() -> bool {
     true
 }
 
 fn default_timeout() -> u64 {
     30
+}
+
+fn default_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {},
+        "required": []
+    })
 }
 
 impl Default for Config {
@@ -94,11 +148,14 @@ impl Default for Config {
                 name: "terminal".to_string(),
             },
             context: ContextConfig::default(),
-
             mcp: HashMap::new(),
             agents: HashMap::new(),
             tui: TuiConfig::default(),
             permissions: HashMap::new(),
+            providers: HashMap::new(),
+            custom_tools: HashMap::new(),
+            commands: HashMap::new(),
+            hooks: HashMap::new(),
         }
     }
 }

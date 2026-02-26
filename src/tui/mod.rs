@@ -17,8 +17,10 @@ use crossterm::{execute, terminal};
 use tokio::sync::{Mutex, mpsc};
 
 use crate::agent::{Agent, AgentProfile};
+use crate::command::CommandRegistry;
 use crate::config::Config;
 use crate::db::Db;
+use crate::extension::HookRegistry;
 use crate::provider::Provider;
 use crate::tools::ToolRegistry;
 
@@ -41,6 +43,8 @@ pub async fn run(
     cwd: String,
     resume_id: Option<String>,
     skill_names: Vec<(String, String)>,
+    hooks: HookRegistry,
+    commands: CommandRegistry,
 ) -> Result<()> {
     terminal::enable_raw_mode()?;
     let mut stdout = std::io::stderr();
@@ -63,6 +67,8 @@ pub async fn run(
         cwd,
         resume_id,
         skill_names,
+        hooks,
+        commands,
     )
     .await;
 
@@ -102,6 +108,8 @@ async fn run_app(
     cwd: String,
     resume_id: Option<String>,
     skill_names: Vec<(String, String)>,
+    hooks: HookRegistry,
+    commands: CommandRegistry,
 ) -> Result<ExitInfo> {
     let model_name = providers[0].model().to_string();
     let provider_name = providers[0].name().to_string();
@@ -121,6 +129,8 @@ async fn run_app(
         profiles,
         cwd,
         agents_context,
+        hooks,
+        commands,
     )?));
 
     let context_window = {
@@ -154,6 +164,13 @@ async fn run_app(
     );
     app.history = history;
     app.skill_entries = skill_names;
+    {
+        let agent_lock = agent.lock().await;
+        let cmds = agent_lock.list_commands();
+        app.custom_command_names = cmds.iter().map(|(n, _)| n.to_string()).collect();
+        app.command_palette.set_skills(&app.skill_entries);
+        app.command_palette.add_custom_commands(&cmds);
+    }
 
     if let Some(ref id) = resume_id {
         let agent_lock = agent.lock().await;
@@ -243,6 +260,16 @@ async fn run_app(
     }
 
     let mut agent_lock = agent.lock().await;
+    {
+        let event = crate::extension::Event::BeforeExit;
+        let ctx = crate::extension::EventContext {
+            event: event.as_str().to_string(),
+            cwd: agent_lock.cwd().to_string(),
+            session_id: agent_lock.conversation_id().to_string(),
+            ..Default::default()
+        };
+        agent_lock.hooks().emit(&event, &ctx);
+    }
     let conversation_id = agent_lock.conversation_id().to_string();
     let title = agent_lock.conversation_title();
     agent_lock.cleanup_if_empty();
@@ -533,6 +560,33 @@ async fn dispatch_action(
                     tracing::error!("Agent send_message error: {}", e);
                 }
             });
+        }
+        InputAction::RunCustomCommand { name, args } => {
+            let display = format!("/{} {}", name, args).trim_end().to_string();
+            app.messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: display,
+                tool_calls: Vec::new(),
+                thinking: None,
+                model: None,
+            });
+            let agent_lock = agent.lock().await;
+            match agent_lock.execute_command(&name, &args) {
+                Ok(output) => {
+                    app.messages.push(ChatMessage {
+                        role: "assistant".to_string(),
+                        content: output,
+                        tool_calls: Vec::new(),
+                        thinking: None,
+                        model: None,
+                    });
+                }
+                Err(e) => {
+                    app.error_message = Some(format!("command error: {}", e));
+                }
+            }
+            drop(agent_lock);
+            app.scroll_to_bottom();
         }
         InputAction::AnswerPermission(_) | InputAction::None => {}
     }

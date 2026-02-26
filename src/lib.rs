@@ -1,10 +1,13 @@
 pub mod agent;
 pub mod auth;
 pub mod cli;
+pub mod command;
 pub mod config;
 pub mod context;
 pub mod db;
+pub mod extension;
 pub mod mcp;
+pub mod packages;
 pub mod provider;
 pub mod skills;
 pub mod snapshot;

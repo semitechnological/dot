@@ -196,9 +196,7 @@ fn render_code_block(
     let pad_len = 2;
 
     // Helper: pad a line to full width with bg fill
-    let fill = |content_len: usize| -> String {
-        " ".repeat(w.saturating_sub(content_len))
-    };
+    let fill = |content_len: usize| -> String { " ".repeat(w.saturating_sub(content_len)) };
 
     // Top line: language badge or blank, all on code_bg
     if !lang.is_empty() {
@@ -259,9 +257,7 @@ fn render_code_block(
                         content_len += text.chars().count();
                         spans.push(Span::styled(
                             text.to_string(),
-                            Style::default()
-                                .fg(Color::Rgb(fg.r, fg.g, fg.b))
-                                .bg(bg),
+                            Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b)).bg(bg),
                         ));
                     }
                     spans.push(Span::styled(fill(content_len), Style::default().bg(bg)));

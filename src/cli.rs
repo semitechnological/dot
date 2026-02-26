@@ -20,4 +20,16 @@ pub enum Commands {
     Config,
     /// List configured MCP servers and their tools
     Mcp,
+    /// List installed extensions
+    Extensions,
+    /// Install an extension from a git URL
+    Install {
+        /// Git URL or local path to the extension
+        source: String,
+    },
+    /// Uninstall an extension by name
+    Uninstall {
+        /// Name of the extension to remove
+        name: String,
+    },
 }

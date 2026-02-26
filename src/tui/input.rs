@@ -31,6 +31,7 @@ pub enum InputAction {
     TruncateToMessage(usize),
     ForkFromMessage(usize),
     LoadSkill { name: String },
+    RunCustomCommand { name: String, args: String },
 }
 
 pub fn handle_paste(app: &mut App, text: String) -> InputAction {
@@ -301,7 +302,11 @@ fn handle_command_palette(app: &mut App, key: KeyEvent) -> InputAction {
             InputAction::None
         }
         KeyCode::Tab => {
-            if let Some(&idx) = app.command_palette.filtered.get(app.command_palette.selected) {
+            if let Some(&idx) = app
+                .command_palette
+                .filtered
+                .get(app.command_palette.selected)
+            {
                 let entry = app.command_palette.entries[idx].clone();
                 if entry.kind == PaletteEntryKind::Command {
                     app.input.clear();
@@ -364,7 +369,16 @@ fn execute_command(app: &mut App, cmd_name: &str) -> InputAction {
             app.help_popup.open();
             InputAction::None
         }
-        _ => InputAction::None,
+        other => {
+            if app.custom_command_names.contains(&other.to_string()) {
+                InputAction::RunCustomCommand {
+                    name: other.to_string(),
+                    args: String::new(),
+                }
+            } else {
+                InputAction::None
+            }
+        }
     }
 }
 
@@ -701,6 +715,21 @@ fn handle_send(app: &mut App) -> InputAction {
         return InputAction::None;
     }
     if let Some(msg) = app.take_input() {
+        if let Some(rest) = msg.strip_prefix('/') {
+            let mut parts = rest.splitn(2, char::is_whitespace);
+            let cmd = parts.next().unwrap_or_default().to_string();
+            let args = parts.next().unwrap_or_default().to_string();
+            let builtin = matches!(
+                cmd.as_str(),
+                "model" | "agent" | "thinking" | "sessions" | "new" | "clear" | "help"
+            );
+            if builtin {
+                return execute_command(app, &cmd);
+            }
+            if app.custom_command_names.contains(&cmd) {
+                return InputAction::RunCustomCommand { name: cmd, args };
+            }
+        }
         InputAction::SendMessage(msg)
     } else {
         InputAction::None
@@ -862,7 +891,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                     let relative_row = row.saturating_sub(popup.y) as usize;
                     if relative_row < app.command_palette.filtered.len() {
                         app.command_palette.selected = relative_row;
-            if let Some(entry) = app.command_palette.confirm() {
+                        if let Some(entry) = app.command_palette.confirm() {
                             app.input.clear();
                             app.cursor_pos = 0;
                             return execute_palette_entry(app, entry);

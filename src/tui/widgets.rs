@@ -285,6 +285,17 @@ impl CommandPalette {
         }
     }
 
+    pub fn add_custom_commands(&mut self, commands: &[(&str, &str)]) {
+        for (name, desc) in commands {
+            self.entries.push(PaletteEntry {
+                name: name.to_string(),
+                description: desc.to_string(),
+                shortcut: String::new(),
+                kind: PaletteEntryKind::Command,
+            });
+        }
+    }
+
     pub fn update_filter(&mut self, input: &str) {
         if self.entries.is_empty() {
             for cmd in COMMANDS {

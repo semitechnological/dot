@@ -211,7 +211,10 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
         let detail = extract_tool_detail(tool_name, &app.pending_tool_input);
 
         let cat_style = tool_category_style(&category, &app.theme);
-        let frames = ["\u{25cb}", "\u{25d4}", "\u{25d1}", "\u{25d5}", "\u{25cf}", "\u{25d5}", "\u{25d1}", "\u{25d4}"];
+        let frames = [
+            "\u{25cb}", "\u{25d4}", "\u{25d1}", "\u{25d5}", "\u{25cf}", "\u{25d5}", "\u{25d1}",
+            "\u{25d4}",
+        ];
         let idx = (app.tick_count / 8 % frames.len() as u64) as usize;
         let intent = category.intent();
         let mut tool_spans = vec![
@@ -245,10 +248,7 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
 
         if has_completed_tools {
             let n = app.current_tool_calls.len();
-            tool_spans.push(Span::styled(
-                format!(" \u{00b7} {} done", n),
-                app.theme.dim,
-            ));
+            tool_spans.push(Span::styled(format!(" \u{00b7} {} done", n), app.theme.dim));
         }
 
         if let Some(elapsed) = app.streaming_elapsed_secs() {
@@ -262,7 +262,10 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
     } else if !has_completed_tools {
         lines.push(Line::from(""));
         lines.push(Line::from(model_header.clone()));
-        let frames = ["\u{25cb}", "\u{25d4}", "\u{25d1}", "\u{25d5}", "\u{25cf}", "\u{25d5}", "\u{25d1}", "\u{25d4}"];
+        let frames = [
+            "\u{25cb}", "\u{25d4}", "\u{25d1}", "\u{25d5}", "\u{25cf}", "\u{25d5}", "\u{25d1}",
+            "\u{25d4}",
+        ];
         let idx = (app.tick_count / 8 % frames.len() as u64) as usize;
         let has_live_thinking = !app.current_thinking.is_empty();
         let mut thinking_spans = vec![

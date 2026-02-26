@@ -223,6 +223,7 @@ pub struct App {
     pub history_index: Option<usize>,
     pub history_draft: String,
     pub skill_entries: Vec<(String, String)>,
+    pub custom_command_names: Vec<String>,
 }
 
 impl App {
@@ -289,6 +290,7 @@ impl App {
             history_index: None,
             history_draft: String::new(),
             skill_entries: Vec::new(),
+            custom_command_names: Vec::new(),
         }
     }
 
@@ -553,7 +555,11 @@ impl App {
         } else {
             for line in display.split('\n') {
                 let total = 2 + line.chars().count();
-                visual += if total == 0 { 1 } else { total.div_ceil(w).max(1) };
+                visual += if total == 0 {
+                    1
+                } else {
+                    total.div_ceil(w).max(1)
+                };
             }
         }
         (visual as u16 + 1).clamp(3, 12)

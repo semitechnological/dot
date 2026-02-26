@@ -6,8 +6,10 @@ pub use profile::AgentProfile;
 
 use events::PendingToolCall;
 
+use crate::command::CommandRegistry;
 use crate::config::Config;
 use crate::db::Db;
+use crate::extension::{Event, EventContext, HookRegistry, HookResult};
 use crate::provider::{ContentBlock, Message, Provider, Role, StreamEventType, Usage};
 use crate::tools::ToolRegistry;
 use anyhow::Result;
@@ -51,6 +53,8 @@ pub struct Agent {
     last_input_tokens: u32,
     permissions: HashMap<String, String>,
     snapshots: crate::snapshot::SnapshotManager,
+    hooks: HookRegistry,
+    commands: CommandRegistry,
 }
 
 impl Agent {
@@ -62,6 +66,8 @@ impl Agent {
         profiles: Vec<AgentProfile>,
         cwd: String,
         agents_context: crate::context::AgentsContext,
+        hooks: HookRegistry,
+        commands: CommandRegistry,
     ) -> Result<Self> {
         assert!(!providers.is_empty(), "at least one provider required");
         let conversation_id =
@@ -87,6 +93,8 @@ impl Agent {
             last_input_tokens: 0,
             permissions: config.permissions.clone(),
             snapshots: crate::snapshot::SnapshotManager::new(),
+            hooks,
+            commands,
         })
     }
     fn provider(&self) -> &dyn Provider {
@@ -94,6 +102,28 @@ impl Agent {
     }
     fn provider_mut(&mut self) -> &mut dyn Provider {
         &mut *self.providers[self.active]
+    }
+    fn event_context(&self, event: &Event) -> EventContext {
+        EventContext {
+            event: event.as_str().to_string(),
+            model: self.provider().model().to_string(),
+            provider: self.provider().name().to_string(),
+            cwd: self.cwd.clone(),
+            session_id: self.conversation_id.clone(),
+            ..Default::default()
+        }
+    }
+    pub fn execute_command(&self, name: &str, args: &str) -> Result<String> {
+        self.commands.execute(name, args, &self.cwd)
+    }
+    pub fn list_commands(&self) -> Vec<(&str, &str)> {
+        self.commands.list()
+    }
+    pub fn has_command(&self, name: &str) -> bool {
+        self.commands.has(name)
+    }
+    pub fn hooks(&self) -> &HookRegistry {
+        &self.hooks
     }
     fn profile(&self) -> &AgentProfile {
         &self.profiles[self.active_profile]
@@ -211,6 +241,10 @@ impl Agent {
             })
             .collect();
         tracing::debug!("Resumed conversation {}", conversation.id);
+        {
+            let ctx = self.event_context(&Event::OnResume);
+            self.hooks.emit(&Event::OnResume, &ctx);
+        }
         Ok(())
     }
     pub fn list_sessions(&self) -> Result<Vec<crate::db::ConversationSummary>> {
@@ -282,6 +316,10 @@ impl Agent {
         let threshold = (limit as f32 * COMPACT_THRESHOLD) as u32;
         self.last_input_tokens >= threshold
     }
+    fn emit_compact_hooks(&self, phase: &Event) {
+        let ctx = self.event_context(phase);
+        self.hooks.emit(phase, &ctx);
+    }
     async fn compact(&mut self, event_tx: &UnboundedSender<AgentEvent>) -> Result<()> {
         let keep = COMPACT_KEEP_MESSAGES;
         if self.messages.len() <= keep + 2 {
@@ -312,6 +350,7 @@ impl Agent {
             ))],
         }];
 
+        self.emit_compact_hooks(&Event::BeforeCompact);
         let mut stream_rx = self
             .provider()
             .stream(
@@ -354,6 +393,7 @@ impl Agent {
         let _ = event_tx.send(AgentEvent::Compacted {
             messages_removed: cutoff,
         });
+        self.emit_compact_hooks(&Event::AfterCompact);
         Ok(())
     }
     pub async fn send_message(
@@ -371,6 +411,11 @@ impl Agent {
         images: Vec<(String, String)>,
         event_tx: UnboundedSender<AgentEvent>,
     ) -> Result<()> {
+        {
+            let mut ctx = self.event_context(&Event::OnUserInput);
+            ctx.prompt = Some(content.to_string());
+            self.hooks.emit(&Event::OnUserInput, &ctx);
+        }
         if self.should_compact() {
             self.compact(&event_tx).await?;
         }
@@ -467,6 +512,25 @@ impl Agent {
                     },
                 }),
             });
+            {
+                let mut ctx = self.event_context(&Event::BeforePrompt);
+                ctx.prompt = Some(content.to_string());
+                match self.hooks.emit_blocking(&Event::BeforePrompt, &ctx) {
+                    HookResult::Block(reason) => {
+                        let _ = event_tx.send(AgentEvent::TextComplete(format!(
+                            "[blocked by hook: {}]",
+                            reason.trim()
+                        )));
+                        return Ok(());
+                    }
+                    HookResult::Modify(_modified) => {}
+                    HookResult::Allow => {}
+                }
+            }
+            self.hooks.emit(
+                &Event::OnStreamStart,
+                &self.event_context(&Event::OnStreamStart),
+            );
             let mut stream_rx = self
                 .provider()
                 .stream(
@@ -477,6 +541,10 @@ impl Agent {
                     thinking_budget,
                 )
                 .await?;
+            self.hooks.emit(
+                &Event::OnStreamEnd,
+                &self.event_context(&Event::OnStreamEnd),
+            );
             let mut full_text = String::new();
             let mut full_thinking = String::new();
             let mut full_thinking_signature = String::new();
@@ -570,6 +638,11 @@ impl Agent {
                 let _ = self
                     .db
                     .add_tool_call(&assistant_msg_id, &tc.id, &tc.name, &tc.input);
+            }
+            {
+                let mut ctx = self.event_context(&Event::AfterPrompt);
+                ctx.prompt = Some(full_text.clone());
+                self.hooks.emit(&Event::AfterPrompt, &ctx);
             }
             if tool_calls.is_empty() {
                 let _ = event_tx.send(AgentEvent::TextComplete(full_text));
@@ -781,6 +854,30 @@ impl Agent {
                         }
                     }
                 }
+                {
+                    let mut ctx = self.event_context(&Event::BeforeToolCall);
+                    ctx.tool_name = Some(tc.name.clone());
+                    ctx.tool_input = Some(tc.input.clone());
+                    match self.hooks.emit_blocking(&Event::BeforeToolCall, &ctx) {
+                        HookResult::Block(reason) => {
+                            let output = format!("[blocked by hook: {}]", reason.trim());
+                            let _ = event_tx.send(AgentEvent::ToolCallResult {
+                                id: tc.id.clone(),
+                                name: tc.name.clone(),
+                                output: output.clone(),
+                                is_error: true,
+                            });
+                            result_blocks.push(ContentBlock::ToolResult {
+                                tool_use_id: tc.id.clone(),
+                                content: output,
+                                is_error: true,
+                            });
+                            continue;
+                        }
+                        HookResult::Modify(_modified) => {}
+                        HookResult::Allow => {}
+                    }
+                }
                 let _ = event_tx.send(AgentEvent::ToolCallExecuting {
                     id: tc.id.clone(),
                     name: tc.name.clone(),
@@ -793,11 +890,22 @@ impl Agent {
                 })
                 .await;
                 let (output, is_error) = match exec_result {
-                    Err(_elapsed) => (
-                        format!("Tool '{}' timed out after 30 seconds.", tc.name),
-                        true,
-                    ),
-                    Ok(Err(e)) => (e.to_string(), true),
+                    Err(_elapsed) => {
+                        let msg = format!("Tool '{}' timed out after 30 seconds.", tc.name);
+                        let mut ctx = self.event_context(&Event::OnToolError);
+                        ctx.tool_name = Some(tc.name.clone());
+                        ctx.error = Some(msg.clone());
+                        self.hooks.emit(&Event::OnToolError, &ctx);
+                        (msg, true)
+                    }
+                    Ok(Err(e)) => {
+                        let msg = e.to_string();
+                        let mut ctx = self.event_context(&Event::OnToolError);
+                        ctx.tool_name = Some(tc.name.clone());
+                        ctx.error = Some(msg.clone());
+                        self.hooks.emit(&Event::OnToolError, &ctx);
+                        (msg, true)
+                    }
                     Ok(Ok(out)) => (out, false),
                 };
                 tracing::debug!(
@@ -813,6 +921,12 @@ impl Agent {
                     output: output.clone(),
                     is_error,
                 });
+                {
+                    let mut ctx = self.event_context(&Event::AfterToolCall);
+                    ctx.tool_name = Some(tc.name.clone());
+                    ctx.tool_output = Some(output.clone());
+                    self.hooks.emit(&Event::AfterToolCall, &ctx);
+                }
                 result_blocks.push(ContentBlock::ToolResult {
                     tool_use_id: tc.id.clone(),
                     content: output,
@@ -844,7 +958,12 @@ impl Agent {
                 let _ = self
                     .db
                     .update_conversation_title(&self.conversation_id, &title);
-                let _ = event_tx.send(AgentEvent::TitleGenerated(title));
+                let _ = event_tx.send(AgentEvent::TitleGenerated(title.clone()));
+                {
+                    let mut ctx = self.event_context(&Event::OnTitleGenerated);
+                    ctx.title = Some(title);
+                    self.hooks.emit(&Event::OnTitleGenerated, &ctx);
+                }
             }
         }
 

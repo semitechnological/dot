@@ -83,20 +83,65 @@ async fn main() -> Result<()> {
                 println!();
             }
         }
+        Some(dot::cli::Commands::Extensions) => {
+            let exts = dot::packages::list();
+            if exts.is_empty() {
+                println!("No extensions installed.");
+                println!("\nInstall with: dot install <git-url>");
+            } else {
+                println!("Installed extensions:\n");
+                for (name, desc, path) in &exts {
+                    println!("  {} \u{2014} {}", name, desc);
+                    println!("    {}", path.display());
+                }
+            }
+        }
+        Some(dot::cli::Commands::Install { source }) => {
+            dot::config::Config::ensure_dirs()?;
+            match dot::packages::install(&source) {
+                Ok(msg) => println!("{}", msg),
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(dot::cli::Commands::Uninstall { name }) => match dot::packages::uninstall(&name) {
+            Ok(msg) => println!("{}", msg),
+            Err(e) => {
+                eprintln!("error: {}", e);
+                std::process::exit(1);
+            }
+        },
         None => {
             dot::config::Config::ensure_dirs()?;
-            let config = dot::config::Config::load()?;
+            let mut config = dot::config::Config::load()?;
+            dot::packages::merge_into_config(&mut config);
             let creds = dot::auth::Credentials::load()?;
             let db = dot::db::Db::open().context("opening database")?;
             let providers = build_providers(&config, &creds)?;
             let (tools, skill_names) = build_tool_registry(&config);
             let profiles = build_agent_profiles(&config);
+            let hooks = build_hooks(&config);
+            let commands = build_commands(&config);
             let cwd = std::env::current_dir()
                 .ok()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
             let resume_id = cli.session.clone();
-            dot::tui::run(config, providers, db, tools, profiles, cwd, resume_id, skill_names).await?;
+            dot::tui::run(
+                config,
+                providers,
+                db,
+                tools,
+                profiles,
+                cwd,
+                resume_id,
+                skill_names,
+                hooks,
+                commands,
+            )
+            .await?;
         }
     }
     Ok(())
@@ -112,7 +157,9 @@ fn try_list_mcp_tools(
     client.list_tools()
 }
 
-fn build_tool_registry(config: &dot::config::Config) -> (dot::tools::ToolRegistry, Vec<(String, String)>) {
+fn build_tool_registry(
+    config: &dot::config::Config,
+) -> (dot::tools::ToolRegistry, Vec<(String, String)>) {
     let mut registry = dot::tools::ToolRegistry::default_tools();
 
     for (name, cfg) in &config.mcp {
@@ -132,6 +179,18 @@ fn build_tool_registry(config: &dot::config::Config) -> (dot::tools::ToolRegistr
                 eprintln!("warning: MCP server '{}' failed to start: {}", name, e);
             }
         }
+    }
+
+    for (name, cfg) in &config.custom_tools {
+        let tool = dot::extension::ScriptTool::new(
+            name.clone(),
+            cfg.description.clone(),
+            cfg.schema.clone(),
+            cfg.command.clone(),
+            cfg.timeout,
+        );
+        registry.register(Box::new(tool));
+        tracing::info!("Registered custom tool: {}", name);
     }
 
     let skill_registry = dot::skills::SkillRegistry::discover();
@@ -246,7 +305,29 @@ fn build_providers(
                 providers.push(p);
             }
         }
-        other => bail!("Unknown provider '{other}'. Supported: anthropic, openai"),
+        other => {
+            if let Some(p) = build_custom_provider(other, config) {
+                providers.push(p);
+            }
+            if let Some(p) = anthropic {
+                providers.push(p);
+            }
+            if let Some(p) = openai {
+                providers.push(p);
+            }
+        }
+    }
+
+    for (name, def) in &config.providers {
+        if !def.enabled {
+            continue;
+        }
+        if Some(name.as_str()) == Some(config.default_provider.as_str()) {
+            continue;
+        }
+        if let Some(p) = build_provider_from_def(name, def) {
+            providers.push(p);
+        }
     }
 
     if providers.is_empty() {
@@ -257,4 +338,78 @@ fn build_providers(
     }
 
     Ok(providers)
+}
+
+fn build_custom_provider(
+    name: &str,
+    config: &dot::config::Config,
+) -> Option<Box<dyn dot::provider::Provider>> {
+    let def = config.providers.get(name)?;
+    build_provider_from_def(name, def)
+}
+
+fn build_provider_from_def(
+    name: &str,
+    def: &dot::config::ProviderDefinition,
+) -> Option<Box<dyn dot::provider::Provider>> {
+    let key = def
+        .api_key_env
+        .as_deref()
+        .and_then(|env| std::env::var(env).ok())
+        .filter(|k| !k.is_empty());
+    let key = match key {
+        Some(k) => k,
+        None => {
+            tracing::warn!("Provider '{}' has no API key (env var not set)", name);
+            return None;
+        }
+    };
+    let model = def
+        .default_model
+        .clone()
+        .or_else(|| def.models.first().cloned())
+        .unwrap_or_else(|| "default".to_string());
+    match def.api.as_str() {
+        "openai" => {
+            let mut oai_config = async_openai::config::OpenAIConfig::new().with_api_key(key);
+            if let Some(ref url) = def.base_url {
+                oai_config = oai_config.with_api_base(url);
+            }
+            Some(Box::new(
+                dot::provider::openai::OpenAIProvider::new_with_config(oai_config, model),
+            ))
+        }
+        "anthropic" => Some(Box::new(
+            dot::provider::anthropic::AnthropicProvider::new_with_api_key(key, model),
+        )),
+        other => {
+            tracing::warn!("Unknown provider API type '{}' for '{}'", other, name);
+            None
+        }
+    }
+}
+
+fn build_hooks(config: &dot::config::Config) -> dot::extension::HookRegistry {
+    let mut registry = dot::extension::HookRegistry::new();
+    for (event_name, cfg) in &config.hooks {
+        if let Some(event) = dot::extension::Event::from_str(event_name) {
+            registry.register(dot::extension::Hook {
+                event,
+                command: cfg.command.clone(),
+                timeout: cfg.timeout,
+            });
+            tracing::info!("Registered hook for event: {}", event_name);
+        } else {
+            tracing::warn!("Unknown hook event: {}", event_name);
+        }
+    }
+    registry
+}
+
+fn build_commands(config: &dot::config::Config) -> dot::command::CommandRegistry {
+    let mut registry = dot::command::CommandRegistry::new();
+    for (name, cfg) in &config.commands {
+        registry.register(dot::command::SlashCommand::from_config(name, cfg));
+    }
+    registry
 }

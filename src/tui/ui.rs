@@ -426,9 +426,7 @@ fn render_message(
             );
             for line in md_lines {
                 let bg = line.spans.first().and_then(|s| s.style.bg);
-                let indent_style = bg
-                    .map(|c| Style::default().bg(c))
-                    .unwrap_or_default();
+                let indent_style = bg.map(|c| Style::default().bg(c)).unwrap_or_default();
                 let mut padded = vec![Span::styled(body_indent, indent_style)];
                 padded.extend(line.spans);
                 if let Some(bg_color) = bg {

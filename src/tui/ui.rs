@@ -58,6 +58,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         ui_popups::draw_command_palette(frame, app, chunks[2]);
     }
 
+    if app.file_picker.visible {
+        ui_popups::draw_file_picker(frame, app, chunks[2]);
+    }
+
     if app.session_selector.visible {
         ui_popups::draw_session_selector(frame, app);
     }
@@ -92,7 +96,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         .as_deref()
         .unwrap_or("new conversation");
 
-    let model_short = shorten_model(&app.model_name);
+    let model_short = display_model(&app.model_name);
     let mut right_spans: Vec<Span<'static>> = Vec::new();
 
     let model_display: String = if compact {
@@ -224,13 +228,15 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         render_message(
             msg,
             msg_idx,
-            &app.theme,
-            app.thinking_expanded,
-            inner.width,
-            area.width,
+            &MessageRenderCtx {
+                theme: &app.theme,
+                thinking_expanded: app.thinking_expanded,
+                inner_width: inner.width,
+                render_width: area.width,
+                expanded_tool_calls: &app.expanded_tool_calls,
+            },
             &mut all_lines,
             &mut line_to_tool,
-            &app.expanded_tool_calls,
         );
         let after = all_lines.len();
         for _ in before..after {
@@ -375,18 +381,22 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn render_message(
-    msg: &ChatMessage,
-    msg_idx: usize,
-    theme: &Theme,
+struct MessageRenderCtx<'a> {
+    theme: &'a Theme,
     thinking_expanded: bool,
     inner_width: u16,
     render_width: u16,
+    expanded_tool_calls: &'a HashSet<(usize, usize)>,
+}
+
+fn render_message(
+    msg: &ChatMessage,
+    msg_idx: usize,
+    ctx: &MessageRenderCtx<'_>,
     lines: &mut Vec<Line<'static>>,
     line_to_tool: &mut Vec<Option<(usize, usize)>>,
-    expanded_tool_calls: &HashSet<(usize, usize)>,
 ) {
-    let compact = inner_width < 55;
+    let compact = ctx.inner_width < 55;
     let body_indent: &str = if compact { "  " } else { "    " };
     let body_indent_cols: u16 = if compact { 2 } else { 4 };
 
@@ -407,23 +417,23 @@ fn render_message(
                     Span::styled(
                         marker,
                         Style::default()
-                            .fg(theme.accent)
+                            .fg(ctx.theme.accent)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         "you ",
                         Style::default()
-                            .fg(theme.accent)
+                            .fg(ctx.theme.accent)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(first.to_string(), theme.user_text),
+                    Span::styled(first.to_string(), ctx.theme.user_text),
                 ]));
             }
             for text_line in content_lines {
                 line_to_tool.push(None);
                 lines.push(Line::from(Span::styled(
                     format!("{}{}", cont, text_line),
-                    theme.user_text,
+                    ctx.theme.user_text,
                 )));
             }
         }
@@ -432,8 +442,8 @@ fn render_message(
             for text_line in msg.content.lines() {
                 line_to_tool.push(None);
                 lines.push(Line::from(vec![
-                    Span::styled(pad, theme.thinking),
-                    Span::styled(text_line.to_string(), theme.dim),
+                    Span::styled(pad, ctx.theme.thinking),
+                    Span::styled(text_line.to_string(), ctx.theme.dim),
                 ]));
             }
         }
@@ -443,25 +453,25 @@ fn render_message(
             } else {
                 ("  \u{25c6}", "  \u{25c6} ")
             };
-            let model_label = msg.model.as_deref().map(shorten_model).unwrap_or_default();
+            let model_label = msg.model.as_deref().map(display_model).unwrap_or_default();
             if model_label.is_empty() {
                 line_to_tool.push(None);
                 lines.push(Line::from(Span::styled(
                     diamond,
-                    Style::default().fg(theme.accent),
+                    Style::default().fg(ctx.theme.accent),
                 )));
             } else {
                 line_to_tool.push(None);
                 lines.push(Line::from(vec![
-                    Span::styled(diamond_sp, Style::default().fg(theme.accent)),
-                    Span::styled(model_label, theme.dim),
+                    Span::styled(diamond_sp, Style::default().fg(ctx.theme.accent)),
+                    Span::styled(model_label, ctx.theme.dim),
                 ]));
             }
             if let Some(ref thinking) = msg.thinking {
                 render_thinking_block(
                     thinking,
-                    thinking_expanded,
-                    theme,
+                    ctx.thinking_expanded,
+                    ctx.theme,
                     compact,
                     lines,
                     line_to_tool,
@@ -479,8 +489,8 @@ fn render_message(
                             }
                             let md_lines = markdown::render_markdown(
                                 t,
-                                theme,
-                                inner_width.saturating_sub(body_indent_cols),
+                                ctx.theme,
+                                ctx.inner_width.saturating_sub(body_indent_cols),
                             );
                             for line in md_lines {
                                 let bg = line.spans.first().and_then(|s| s.style.bg);
@@ -491,7 +501,7 @@ fn render_message(
                                 if let Some(bg_color) = bg {
                                     let used: usize =
                                         padded.iter().map(|s| s.content.chars().count()).sum();
-                                    let target = render_width as usize;
+                                    let target = ctx.render_width as usize;
                                     if used < target {
                                         padded.push(Span::styled(
                                             " ".repeat(target - used),
@@ -511,12 +521,12 @@ fn render_message(
                             }
                             ui_tools::render_tool_calls_compact(
                                 std::slice::from_ref(tc),
-                                theme,
+                                ctx.theme,
                                 compact,
                                 lines,
                                 Some(line_to_tool),
                                 msg_idx,
-                                |_| expanded_tool_calls.contains(&(msg_idx, tool_idx)),
+                                |_| ctx.expanded_tool_calls.contains(&(msg_idx, tool_idx)),
                             );
                             tool_idx += 1;
                             prev_was_tool = true;
@@ -527,18 +537,18 @@ fn render_message(
                 if !msg.tool_calls.is_empty() && msg.content.is_empty() {
                     ui_tools::render_tool_calls(
                         &msg.tool_calls,
-                        theme,
+                        ctx.theme,
                         compact,
                         lines,
                         Some(line_to_tool),
                         msg_idx,
-                        |i| expanded_tool_calls.contains(&(msg_idx, i)),
+                        |i| ctx.expanded_tool_calls.contains(&(msg_idx, i)),
                     );
                 }
                 let md_lines = markdown::render_markdown(
                     &msg.content,
-                    theme,
-                    inner_width.saturating_sub(body_indent_cols),
+                    ctx.theme,
+                    ctx.inner_width.saturating_sub(body_indent_cols),
                 );
                 for line in md_lines {
                     let bg = line.spans.first().and_then(|s| s.style.bg);
@@ -547,7 +557,7 @@ fn render_message(
                     padded.extend(line.spans);
                     if let Some(bg_color) = bg {
                         let used: usize = padded.iter().map(|s| s.content.chars().count()).sum();
-                        let target = render_width as usize;
+                        let target = ctx.render_width as usize;
                         if used < target {
                             padded.push(Span::styled(
                                 " ".repeat(target - used),
@@ -561,12 +571,12 @@ fn render_message(
                 if !msg.tool_calls.is_empty() && !msg.content.is_empty() {
                     ui_tools::render_tool_calls_compact(
                         &msg.tool_calls,
-                        theme,
+                        ctx.theme,
                         compact,
                         lines,
                         Some(line_to_tool),
                         msg_idx,
-                        |i| expanded_tool_calls.contains(&(msg_idx, i)),
+                        |i| ctx.expanded_tool_calls.contains(&(msg_idx, i)),
                     );
                 }
             }
@@ -927,17 +937,75 @@ pub fn format_elapsed(secs: f64) -> String {
     }
 }
 
-pub fn shorten_model(model: &str) -> String {
-    if model.len() <= 30 {
+pub fn display_model(model: &str) -> String {
+    let formatted = format_model_name(model);
+    if formatted.chars().count() <= 30 {
+        return formatted;
+    }
+    let truncated: String = formatted.chars().take(29).collect();
+    format!("{}\u{2026}", truncated)
+}
+
+fn format_model_name(model: &str) -> String {
+    let base = if let Some(pos) = model.rfind('-') {
+        let suffix = &model[pos + 1..];
+        if suffix.len() == 8 && suffix.chars().all(|c| c.is_ascii_digit()) {
+            &model[..pos]
+        } else {
+            model
+        }
+    } else {
+        model
+    };
+
+    let parts: Vec<&str> = base.split('-').collect();
+    let mut result: Vec<String> = Vec::new();
+    let mut i = 0;
+
+    while i < parts.len() {
+        let part = parts[i];
+
+        if part.eq_ignore_ascii_case("gpt") {
+            result.push("GPT".into());
+        } else if part.eq_ignore_ascii_case("claude") {
+            result.push("Claude".into());
+        } else if part.eq_ignore_ascii_case("latest") {
+            // skip
+        } else if part.len() >= 2
+            && part.as_bytes()[0].eq_ignore_ascii_case(&b'o')
+            && part[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            result.push(part.to_lowercase());
+        } else if part.chars().all(|c| c.is_ascii_digit()) {
+            let mut version = part.to_string();
+            while i + 1 < parts.len()
+                && parts[i + 1].len() <= 2
+                && parts[i + 1].chars().all(|c| c.is_ascii_digit())
+            {
+                i += 1;
+                version.push('.');
+                version.push_str(parts[i]);
+            }
+            result.push(version);
+        } else if part.contains('.') && part.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            result.push(part.into());
+        } else {
+            let mut chars = part.chars();
+            let formatted = match chars.next() {
+                None => String::new(),
+                Some(c) => {
+                    format!("{}{}", c.to_uppercase().collect::<String>(), chars.as_str())
+                }
+            };
+            result.push(formatted);
+        }
+        i += 1;
+    }
+
+    if result.is_empty() {
         return model.to_string();
     }
-    if let Some(idx) = model.rfind('-') {
-        let suffix = &model[idx..];
-        if suffix.len() > 8 {
-            return format!("{}{}", &model[..25], "\u{2026}");
-        }
-    }
-    format!("{}\u{2026}", &model[..29])
+    result.join(" ")
 }
 
 fn format_tokens(n: u32) -> String {

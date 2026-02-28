@@ -8,8 +8,8 @@ use crate::agent::{AgentEvent, QuestionResponder, TodoItem};
 use crate::tui::theme::Theme;
 use crate::tui::tools::{StreamSegment, ToolCallDisplay, ToolCategory, extract_tool_detail};
 use crate::tui::widgets::{
-    AgentSelector, CommandPalette, HelpPopup, MessageContextMenu, ModelSelector, SessionSelector,
-    ThinkingLevel, ThinkingSelector,
+    AgentSelector, CommandPalette, FilePicker, HelpPopup, MessageContextMenu, ModelSelector,
+    SessionSelector, ThinkingLevel, ThinkingSelector,
 };
 
 pub struct ChatMessage {
@@ -210,6 +210,7 @@ pub struct LayoutRects {
     pub context_menu: Option<Rect>,
     pub question_popup: Option<Rect>,
     pub permission_popup: Option<Rect>,
+    pub file_picker: Option<Rect>,
 }
 
 pub struct App {
@@ -280,6 +281,7 @@ pub struct App {
     pub rename_input: String,
     pub rename_visible: bool,
     pub favorite_models: Vec<String>,
+    pub file_picker: FilePicker,
 }
 impl App {
     pub fn new(
@@ -352,6 +354,7 @@ impl App {
             rename_input: String::new(),
             rename_visible: false,
             favorite_models: Vec::new(),
+            file_picker: FilePicker::new(),
         }
     }
 

@@ -80,6 +80,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
             app.command_palette.close();
             return InputAction::None;
         }
+        if app.file_picker.visible {
+            app.file_picker.close();
+            return InputAction::None;
+        }
         if app.thinking_selector.visible {
             app.thinking_selector.close();
             return InputAction::None;
@@ -160,6 +164,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
 
     if app.command_palette.visible {
         return handle_command_palette(app, key);
+    }
+
+    if app.file_picker.visible {
+        return handle_file_picker(app, key);
     }
 
     if key.modifiers.contains(KeyModifiers::CONTROL)
@@ -368,6 +376,69 @@ fn handle_command_palette(app: &mut App, key: KeyEvent) -> InputAction {
             app.command_palette.update_filter(&app.input);
             if app.command_palette.filtered.is_empty() {
                 app.command_palette.close();
+            }
+            InputAction::None
+        }
+        _ => InputAction::None,
+    }
+}
+
+fn handle_file_picker(app: &mut App, key: KeyEvent) -> InputAction {
+    match key.code {
+        KeyCode::Esc => {
+            app.file_picker.close();
+            InputAction::None
+        }
+        KeyCode::Up => {
+            app.file_picker.up();
+            InputAction::None
+        }
+        KeyCode::Down | KeyCode::Tab => {
+            app.file_picker.down();
+            InputAction::None
+        }
+        KeyCode::Enter => {
+            if let Some(entry) = app.file_picker.confirm() {
+                if entry.is_dir {
+                    let new_query = format!("{}/", entry.path);
+                    let start = app.file_picker.at_pos;
+                    let end = app.cursor_pos;
+                    app.input
+                        .replace_range(start..end, &format!("@{}", new_query));
+                    app.cursor_pos = start + 1 + new_query.len();
+                    app.file_picker.open(start);
+                    app.file_picker.update_query(&new_query);
+                } else {
+                    let path = entry.path;
+                    let start = app.file_picker.at_pos;
+                    let end = app.cursor_pos;
+                    app.input.replace_range(start..end, &format!("@{} ", path));
+                    app.cursor_pos = start + path.len() + 2;
+                }
+            }
+            InputAction::None
+        }
+        KeyCode::Backspace => {
+            app.delete_char_before();
+            let at_pos = app.file_picker.at_pos;
+            if app.cursor_pos <= at_pos {
+                app.file_picker.close();
+            } else {
+                let query = app.input[at_pos + 1..app.cursor_pos].to_string();
+                app.file_picker.update_query(&query);
+                if app.file_picker.filtered.is_empty() {
+                    app.file_picker.close();
+                }
+            }
+            InputAction::None
+        }
+        KeyCode::Char(c) => {
+            app.insert_char(c);
+            let at_pos = app.file_picker.at_pos;
+            let query = app.input[at_pos + 1..app.cursor_pos].to_string();
+            app.file_picker.update_query(&query);
+            if app.file_picker.filtered.is_empty() {
+                app.file_picker.close();
             }
             InputAction::None
         }
@@ -787,6 +858,18 @@ fn handle_char_input(app: &mut App, c: char) -> InputAction {
             app.command_palette.close();
         }
     }
+    if c == '@' && !app.file_picker.visible {
+        let pos = app.cursor_pos - 1;
+        let at_boundary = pos == 0
+            || app
+                .input
+                .as_bytes()
+                .get(pos.wrapping_sub(1))
+                .is_none_or(|b| b.is_ascii_whitespace());
+        if at_boundary {
+            app.file_picker.open(pos);
+        }
+    }
     InputAction::None
 }
 
@@ -938,6 +1021,28 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                     return InputAction::None;
                 } else {
                     app.command_palette.close();
+                    return InputAction::None;
+                }
+            }
+
+            if app.file_picker.visible
+                && let Some(popup) = app.layout.file_picker
+            {
+                if rect_contains(popup, col, row) {
+                    let relative_row = row.saturating_sub(popup.y + 1) as usize;
+                    if relative_row < app.file_picker.filtered.len() {
+                        app.file_picker.selected = relative_row;
+                        if let Some(entry) = app.file_picker.confirm() {
+                            let path = entry.path;
+                            let start = app.file_picker.at_pos;
+                            let end = app.cursor_pos;
+                            app.input.replace_range(start..end, &format!("@{} ", path));
+                            app.cursor_pos = start + path.len() + 2;
+                        }
+                    }
+                    return InputAction::None;
+                } else {
+                    app.file_picker.close();
                     return InputAction::None;
                 }
             }

@@ -78,7 +78,10 @@ pub fn draw_model_selector(frame: &mut Frame, app: &mut App) {
             star.to_string(),
             Style::default().fg(app.theme.accent),
         ));
-        spans.push(Span::styled(entry.model.clone(), name_style));
+        spans.push(Span::styled(
+            crate::tui::ui::display_model(&entry.model),
+            name_style,
+        ));
         content_lines.push(Line::from(spans));
     }
 
@@ -865,4 +868,80 @@ pub fn draw_rename_popup(frame: &mut Frame, app: &App) {
         app.theme.dim,
     )));
     frame.render_widget(Paragraph::new(all_lines), inner);
+}
+
+pub fn draw_file_picker(frame: &mut Frame, app: &mut App, input_area: Rect) {
+    let picker = &app.file_picker;
+    if picker.filtered.is_empty() {
+        app.layout.file_picker = None;
+        return;
+    }
+
+    let items: Vec<&crate::tui::widgets::FilePickerEntry> = picker
+        .filtered
+        .iter()
+        .map(|&i| &picker.entries[i])
+        .collect();
+
+    let content_width = items.iter().map(|e| e.path.len() + 8).max().unwrap_or(20) as u16;
+    let content_height = items.len().min(12) as u16;
+
+    let box_width = (content_width + 2).min(input_area.width.saturating_sub(2));
+    let box_height = content_height + 2;
+
+    let popup_y = input_area.y.saturating_sub(box_height);
+    let popup = Rect::new(input_area.x + 1, popup_y, box_width, box_height);
+
+    app.layout.file_picker = Some(popup);
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.muted_fg));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let visible_count = inner.height as usize;
+    let scroll = if picker.selected >= visible_count {
+        picker.selected - visible_count + 1
+    } else {
+        0
+    };
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for (i, entry) in items.iter().enumerate().skip(scroll).take(visible_count) {
+        let is_sel = i == picker.selected;
+        let icon = if entry.is_dir { "\u{25b8} " } else { "  " };
+        let display = if entry.is_dir {
+            format!("{}/", entry.path)
+        } else {
+            entry.path.clone()
+        };
+        if is_sel {
+            lines.push(Line::from(vec![
+                Span::styled(" \u{25b8} ", Style::default().fg(app.theme.accent)),
+                Span::styled(
+                    format!("{}{}", icon, display),
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled(
+                    format!("{}{}", icon, display),
+                    if entry.is_dir {
+                        Style::default().fg(app.theme.muted_fg)
+                    } else {
+                        Style::default().fg(Color::Reset)
+                    },
+                ),
+            ]));
+        }
+    }
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }

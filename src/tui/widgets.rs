@@ -698,3 +698,168 @@ impl MessageContextMenu {
         &["continue from here", "fork from here"]
     }
 }
+
+#[derive(Clone)]
+pub struct FilePickerEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+pub struct FilePicker {
+    pub visible: bool,
+    pub entries: Vec<FilePickerEntry>,
+    pub filtered: Vec<usize>,
+    pub selected: usize,
+    pub query: String,
+    pub at_pos: usize,
+    base_dir: String,
+}
+
+impl Default for FilePicker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FilePicker {
+    pub fn new() -> Self {
+        Self {
+            visible: false,
+            entries: Vec::new(),
+            filtered: Vec::new(),
+            selected: 0,
+            query: String::new(),
+            at_pos: 0,
+            base_dir: String::new(),
+        }
+    }
+
+    pub fn open(&mut self, at_pos: usize) {
+        self.visible = true;
+        self.at_pos = at_pos;
+        self.query.clear();
+        self.selected = 0;
+        self.base_dir.clear();
+        self.populate();
+    }
+
+    pub fn close(&mut self) {
+        self.visible = false;
+        self.query.clear();
+        self.entries.clear();
+        self.filtered.clear();
+    }
+
+    pub fn populate(&mut self) {
+        let (dir, _) = self.dir_and_filter();
+        self.base_dir = dir.clone();
+        self.entries.clear();
+
+        let read_path = if dir.is_empty() {
+            ".".to_string()
+        } else {
+            dir.clone()
+        };
+        let Ok(rd) = std::fs::read_dir(&read_path) else {
+            return;
+        };
+
+        let mut dirs = Vec::new();
+        let mut files = Vec::new();
+
+        for entry in rd.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                continue;
+            }
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let rel = if dir.is_empty() {
+                name.clone()
+            } else {
+                format!("{}{}", dir, name)
+            };
+            let e = FilePickerEntry {
+                name,
+                path: rel,
+                is_dir,
+            };
+            if is_dir {
+                dirs.push(e);
+            } else {
+                files.push(e);
+            }
+        }
+
+        dirs.sort_by(|a, b| a.name.cmp(&b.name));
+        files.sort_by(|a, b| a.name.cmp(&b.name));
+        self.entries.extend(dirs);
+        self.entries.extend(files);
+        self.apply_filter();
+    }
+
+    fn dir_and_filter(&self) -> (String, String) {
+        if let Some(pos) = self.query.rfind('/') {
+            (
+                self.query[..=pos].to_string(),
+                self.query[pos + 1..].to_string(),
+            )
+        } else {
+            (String::new(), self.query.clone())
+        }
+    }
+
+    pub fn apply_filter(&mut self) {
+        let (_, filter) = self.dir_and_filter();
+        let q = filter.to_lowercase();
+        self.filtered = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                if q.is_empty() {
+                    return true;
+                }
+                e.name.to_lowercase().starts_with(&q) || e.name.to_lowercase().contains(&q)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if self.selected >= self.filtered.len() {
+            self.selected = self.filtered.len().saturating_sub(1);
+        }
+    }
+
+    pub fn update_query(&mut self, query: &str) {
+        let (old_dir, _) = self.dir_and_filter();
+        self.query = query.to_string();
+        let (new_dir, _) = self.dir_and_filter();
+        if new_dir != old_dir {
+            self.populate();
+        } else {
+            self.apply_filter();
+        }
+    }
+
+    pub fn up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn down(&mut self) {
+        if self.selected + 1 < self.filtered.len() {
+            self.selected += 1;
+        }
+    }
+
+    pub fn confirm(&mut self) -> Option<FilePickerEntry> {
+        if self.visible && !self.filtered.is_empty() {
+            self.visible = false;
+            let entry = self.entries[self.filtered[self.selected]].clone();
+            self.query.clear();
+            Some(entry)
+        } else {
+            None
+        }
+    }
+}

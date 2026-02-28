@@ -200,6 +200,7 @@ async fn run_app(
 
     let mut events = EventHandler::new();
     let mut agent_rx: Option<mpsc::UnboundedReceiver<crate::agent::AgentEvent>> = None;
+    let mut agent_task: Option<tokio::task::JoinHandle<()>> = None;
 
     loop {
         terminal.draw(|f| ui::draw(f, &mut app))?;
@@ -228,7 +229,7 @@ async fn run_app(
                                 app.streaming_segments.clear();
                                 app.status_message = None;
                                 let agent_clone = Arc::clone(&agent);
-                                tokio::spawn(async move {
+                                agent_task = Some(tokio::spawn(async move {
                                     let mut agent = agent_clone.lock().await;
                                     let result = if queued.images.is_empty() {
                                         agent.send_message(&queued.text, tx).await
@@ -238,7 +239,7 @@ async fn run_app(
                                     if let Err(e) = result {
                                         tracing::error!("Agent send_message error: {}", e);
                                     }
-                                });
+                                }));
                             }
                         }
                     }
@@ -258,7 +259,7 @@ async fn run_app(
             }
         };
 
-        match handle_event(&mut app, &agent, event, &mut agent_rx).await {
+        match handle_event(&mut app, &agent, event, &mut agent_rx, &mut agent_task).await {
             LoopSignal::Quit => break,
             LoopSignal::OpenEditor => {
                 let editor = std::env::var("VISUAL")
@@ -329,10 +330,14 @@ async fn dispatch_action(
     agent: &Arc<Mutex<Agent>>,
     action: InputAction,
     agent_rx: &mut Option<mpsc::UnboundedReceiver<crate::agent::AgentEvent>>,
+    agent_task: &mut Option<tokio::task::JoinHandle<()>>,
 ) -> LoopSignal {
     match action {
         InputAction::Quit => return LoopSignal::Quit,
         InputAction::CancelStream => {
+            if let Some(handle) = agent_task.take() {
+                handle.abort();
+            }
             *agent_rx = None;
             app.is_streaming = false;
             app.streaming_started = None;
@@ -395,7 +400,7 @@ async fn dispatch_action(
 
             let agent_clone = Arc::clone(agent);
             let err_tx = tx.clone();
-            tokio::spawn(async move {
+            *agent_task = Some(tokio::spawn(async move {
                 let mut agent = agent_clone.lock().await;
                 let result = if images.is_empty() {
                     agent.send_message(&msg, tx).await
@@ -406,7 +411,7 @@ async fn dispatch_action(
                     tracing::error!("Agent send_message error: {}", e);
                     let _ = err_tx.send(crate::agent::AgentEvent::Error(format!("{e}")));
                 }
-            });
+            }));
         }
         InputAction::NewConversation => {
             let mut agent_lock = agent.lock().await;
@@ -627,12 +632,12 @@ async fn dispatch_action(
             let (tx, rx) = mpsc::unbounded_channel();
             *agent_rx = Some(rx);
             let agent_clone = Arc::clone(agent);
-            tokio::spawn(async move {
+            *agent_task = Some(tokio::spawn(async move {
                 let mut agent = agent_clone.lock().await;
                 if let Err(e) = agent.send_message(&msg, tx).await {
                     tracing::error!("Agent send_message error: {}", e);
                 }
-            });
+            }));
         }
         InputAction::RunCustomCommand { name, args } => {
             let display = format!("/{} {}", name, args).trim_end().to_string();
@@ -759,6 +764,7 @@ async fn handle_event(
     agent: &Arc<Mutex<Agent>>,
     event: AppEvent,
     agent_rx: &mut Option<mpsc::UnboundedReceiver<crate::agent::AgentEvent>>,
+    agent_task: &mut Option<tokio::task::JoinHandle<()>>,
 ) -> LoopSignal {
     let action = match event {
         AppEvent::Key(key) => input::handle_key(app, key),
@@ -778,5 +784,5 @@ async fn handle_event(
         }
         AppEvent::Resize(_, _) => return LoopSignal::Continue,
     };
-    dispatch_action(app, agent, action, agent_rx).await
+    dispatch_action(app, agent, action, agent_rx, agent_task).await
 }

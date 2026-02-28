@@ -402,6 +402,35 @@ impl Agent {
         self.emit_compact_hooks(&Event::AfterCompact);
         Ok(())
     }
+    /// Remove orphaned tool-call cycles from the end of the conversation.
+    /// This happens when a previous stream was cancelled or errored mid-execution,
+    /// leaving ToolResult messages without a subsequent assistant response, or
+    /// assistant ToolUse messages without corresponding ToolResult messages.
+    fn sanitize(&mut self) {
+        loop {
+            let dominated = match self.messages.last() {
+                None => false,
+                Some(msg) if msg.role == Role::User => {
+                    !msg.content.is_empty()
+                        && msg
+                            .content
+                            .iter()
+                            .all(|b| matches!(b, ContentBlock::ToolResult { .. }))
+                }
+                Some(msg) if msg.role == Role::Assistant => msg
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, ContentBlock::ToolUse { .. })),
+                _ => false,
+            };
+            if dominated {
+                self.messages.pop();
+            } else {
+                break;
+            }
+        }
+    }
+
     pub async fn send_message(
         &mut self,
         content: &str,
@@ -417,6 +446,7 @@ impl Agent {
         images: Vec<(String, String)>,
         event_tx: UnboundedSender<AgentEvent>,
     ) -> Result<()> {
+        self.sanitize();
         {
             let mut ctx = self.event_context(&Event::OnUserInput);
             ctx.prompt = Some(content.to_string());

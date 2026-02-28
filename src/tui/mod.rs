@@ -190,6 +190,7 @@ async fn run_app(
                     tool_calls: Vec::new(),
                     thinking: None,
                     model,
+                    segments: None,
                 });
             }
             app.scroll_to_bottom();
@@ -224,6 +225,7 @@ async fn run_app(
                                 app.current_response.clear();
                                 app.current_thinking.clear();
                                 app.current_tool_calls.clear();
+                                app.streaming_segments.clear();
                                 app.status_message = None;
                                 let agent_clone = Arc::clone(&agent);
                                 tokio::spawn(async move {
@@ -334,7 +336,27 @@ async fn dispatch_action(
             *agent_rx = None;
             app.is_streaming = false;
             app.streaming_started = None;
-            if !app.current_response.is_empty() || !app.current_tool_calls.is_empty() {
+            if !app.current_response.is_empty()
+                || !app.current_tool_calls.is_empty()
+                || !app.streaming_segments.is_empty()
+            {
+                if !app.current_response.is_empty() {
+                    app.streaming_segments
+                        .push(crate::tui::tools::StreamSegment::Text(std::mem::take(
+                            &mut app.current_response,
+                        )));
+                }
+                let content: String = app
+                    .streaming_segments
+                    .iter()
+                    .filter_map(|s| {
+                        if let crate::tui::tools::StreamSegment::Text(t) = s {
+                            Some(t.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
                 let thinking = if app.current_thinking.is_empty() {
                     None
                 } else {
@@ -342,15 +364,17 @@ async fn dispatch_action(
                 };
                 app.messages.push(app::ChatMessage {
                     role: "assistant".to_string(),
-                    content: std::mem::take(&mut app.current_response),
+                    content,
                     tool_calls: std::mem::take(&mut app.current_tool_calls),
                     thinking,
                     model: Some(app.model_name.clone()),
+                    segments: Some(std::mem::take(&mut app.streaming_segments)),
                 });
             } else {
                 app.current_response.clear();
                 app.current_thinking.clear();
                 app.current_tool_calls.clear();
+                app.streaming_segments.clear();
             }
             app.pending_tool_name = None;
             // Drop pending question/permission to unblock agent
@@ -473,6 +497,7 @@ async fn dispatch_action(
                                     tool_calls: Vec::new(),
                                     thinking: None,
                                     model,
+                                    segments: None,
                                 });
                             }
                             app.scroll_to_bottom();
@@ -542,6 +567,7 @@ async fn dispatch_action(
             app.current_response.clear();
             app.current_thinking.clear();
             app.current_tool_calls.clear();
+            app.streaming_segments.clear();
             app.scroll_to_bottom();
             let mut agent_lock = agent.lock().await;
             agent_lock.truncate_messages(idx + 1);
@@ -563,6 +589,7 @@ async fn dispatch_action(
                             tool_calls: Vec::new(),
                             thinking: None,
                             model,
+                            segments: None,
                         });
                     }
                     app.scroll_to_bottom();
@@ -581,6 +608,7 @@ async fn dispatch_action(
                 tool_calls: Vec::new(),
                 thinking: None,
                 model: None,
+                segments: None,
             });
             app.scroll_to_bottom();
         }
@@ -592,6 +620,7 @@ async fn dispatch_action(
                 tool_calls: Vec::new(),
                 thinking: None,
                 model: None,
+                segments: None,
             });
             app.scroll_to_bottom();
             let msg = format!("Load and use the {} skill", name);
@@ -613,6 +642,7 @@ async fn dispatch_action(
                 tool_calls: Vec::new(),
                 thinking: None,
                 model: None,
+                segments: None,
             });
             let agent_lock = agent.lock().await;
             match agent_lock.execute_command(&name, &args) {
@@ -623,6 +653,7 @@ async fn dispatch_action(
                         tool_calls: Vec::new(),
                         thinking: None,
                         model: None,
+                        segments: None,
                     });
                 }
                 Err(e) => {

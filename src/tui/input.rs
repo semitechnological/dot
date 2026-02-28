@@ -955,9 +955,19 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
             } else if rect_contains(app.layout.messages, col, row) {
                 let content_y = app.layout.messages.y + 1;
                 if row >= content_y {
-                    let content_col = col.saturating_sub(app.layout.messages.x);
                     let content_row = row - content_y;
                     let visual_row = app.scroll_offset + content_row;
+                    if let Some(Some((msg_idx, tool_idx))) =
+                        app.tool_line_map.get(visual_row as usize).copied()
+                    {
+                        if app.expanded_tool_calls.contains(&(msg_idx, tool_idx)) {
+                            app.expanded_tool_calls.remove(&(msg_idx, tool_idx));
+                        } else {
+                            app.expanded_tool_calls.insert((msg_idx, tool_idx));
+                        }
+                        return InputAction::None;
+                    }
+                    let content_col = col.saturating_sub(app.layout.messages.x);
                     app.selection.start(content_col, visual_row);
                 }
                 if app.vim_mode && app.mode == AppMode::Insert && app.input.is_empty() {

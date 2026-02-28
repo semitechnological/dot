@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::time::Instant;
 
@@ -6,7 +6,7 @@ use ratatui::layout::Rect;
 
 use crate::agent::{AgentEvent, QuestionResponder, TodoItem};
 use crate::tui::theme::Theme;
-use crate::tui::tools::{ToolCallDisplay, ToolCategory, extract_tool_detail};
+use crate::tui::tools::{StreamSegment, ToolCallDisplay, ToolCategory, extract_tool_detail};
 use crate::tui::widgets::{
     AgentSelector, CommandPalette, HelpPopup, MessageContextMenu, ModelSelector, SessionSelector,
     ThinkingLevel, ThinkingSelector,
@@ -18,6 +18,8 @@ pub struct ChatMessage {
     pub tool_calls: Vec<ToolCallDisplay>,
     pub thinking: Option<String>,
     pub model: Option<String>,
+    /// Interleaved text and tool calls in display order. When Some, used for rendering; when None, fall back to content + tool_calls.
+    pub segments: Option<Vec<StreamSegment>>,
 }
 
 pub struct TokenUsage {
@@ -234,6 +236,7 @@ pub struct App {
     pub pending_tool_name: Option<String>,
     pub pending_tool_input: String,
     pub current_tool_calls: Vec<ToolCallDisplay>,
+    pub streaming_segments: Vec<StreamSegment>,
     pub status_message: Option<StatusMessage>,
     pub model_selector: ModelSelector,
     pub agent_selector: AgentSelector,
@@ -263,6 +266,8 @@ pub struct App {
     pub esc_hint_until: Option<Instant>,
     pub todos: Vec<TodoItem>,
     pub message_line_map: Vec<usize>,
+    pub tool_line_map: Vec<Option<(usize, usize)>>,
+    pub expanded_tool_calls: HashSet<(usize, usize)>,
     pub context_menu: MessageContextMenu,
     pub pending_question: Option<PendingQuestion>,
     pub pending_permission: Option<PendingPermission>,
@@ -308,6 +313,7 @@ impl App {
             pending_tool_name: None,
             pending_tool_input: String::new(),
             current_tool_calls: Vec::new(),
+            streaming_segments: Vec::new(),
             status_message: None,
             model_selector: ModelSelector::new(),
             agent_selector: AgentSelector::new(),
@@ -332,6 +338,8 @@ impl App {
             esc_hint_until: None,
             todos: Vec::new(),
             message_line_map: Vec::new(),
+            tool_line_map: Vec::new(),
+            expanded_tool_calls: HashSet::new(),
             context_menu: MessageContextMenu::new(),
             pending_question: None,
             pending_permission: None,
@@ -365,11 +373,31 @@ impl App {
                 self.current_thinking.push_str(&text);
             }
             AgentEvent::TextComplete(text) => {
-                if !text.is_empty() || !self.current_response.is_empty() {
-                    let content = if self.current_response.is_empty() {
-                        text
+                if !text.is_empty()
+                    || !self.current_response.is_empty()
+                    || !self.streaming_segments.is_empty()
+                {
+                    if !self.current_response.is_empty() {
+                        self.streaming_segments
+                            .push(StreamSegment::Text(std::mem::take(
+                                &mut self.current_response,
+                            )));
+                    }
+                    let content: String = self
+                        .streaming_segments
+                        .iter()
+                        .filter_map(|s| {
+                            if let StreamSegment::Text(t) = s {
+                                Some(t.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    let content = if content.is_empty() {
+                        text.clone()
                     } else {
-                        self.current_response.clone()
+                        content
                     };
                     let thinking = if self.current_thinking.is_empty() {
                         None
@@ -382,12 +410,15 @@ impl App {
                         tool_calls: std::mem::take(&mut self.current_tool_calls),
                         thinking,
                         model: Some(self.model_name.clone()),
+                        segments: Some(std::mem::take(&mut self.streaming_segments)),
                     });
                 }
                 self.current_response.clear();
                 self.current_thinking.clear();
+                self.streaming_segments.clear();
                 self.is_streaming = false;
                 self.streaming_started = None;
+                self.scroll_to_bottom();
             }
             AgentEvent::ToolCallStart { name, .. } => {
                 self.pending_tool_name = Some(name);
@@ -406,17 +437,26 @@ impl App {
                 is_error,
                 ..
             } => {
+                if !self.current_response.is_empty() {
+                    self.streaming_segments
+                        .push(StreamSegment::Text(std::mem::take(
+                            &mut self.current_response,
+                        )));
+                }
                 let input = std::mem::take(&mut self.pending_tool_input);
                 let category = ToolCategory::from_name(&name);
                 let detail = extract_tool_detail(&name, &input);
-                self.current_tool_calls.push(ToolCallDisplay {
+                let display = ToolCallDisplay {
                     name: name.clone(),
                     input,
                     output: Some(output),
                     is_error,
                     category,
                     detail,
-                });
+                };
+                self.current_tool_calls.push(display.clone());
+                self.streaming_segments
+                    .push(StreamSegment::ToolCall(display));
                 self.pending_tool_name = None;
             }
             AgentEvent::Done { usage } => {
@@ -425,6 +465,7 @@ impl App {
                 self.last_input_tokens = usage.input_tokens;
                 self.usage.input_tokens += usage.input_tokens;
                 self.usage.output_tokens += usage.output_tokens;
+                self.scroll_to_bottom();
             }
             AgentEvent::Error(msg) => {
                 self.is_streaming = false;
@@ -438,6 +479,7 @@ impl App {
                     tool_calls: Vec::new(),
                     thinking: None,
                     model: None,
+                    segments: None,
                 });
             }
             AgentEvent::TitleGenerated(title) => {
@@ -515,6 +557,7 @@ impl App {
             tool_calls: Vec::new(),
             thinking: None,
             model: None,
+            segments: None,
         });
         self.input.clear();
         self.cursor_pos = 0;
@@ -527,6 +570,7 @@ impl App {
         self.current_response.clear();
         self.current_thinking.clear();
         self.current_tool_calls.clear();
+        self.streaming_segments.clear();
         self.status_message = None;
         self.scroll_to_bottom();
         Some(trimmed)
@@ -566,6 +610,7 @@ impl App {
             tool_calls: Vec::new(),
             thinking: None,
             model: None,
+            segments: None,
         });
         let images: Vec<(String, String)> = self
             .attachments
@@ -772,6 +817,7 @@ impl App {
         self.current_response.clear();
         self.current_thinking.clear();
         self.current_tool_calls.clear();
+        self.streaming_segments.clear();
         self.scroll_offset = 0;
         self.scroll_position = 0.0;
         self.scroll_velocity = 0.0;
@@ -787,6 +833,8 @@ impl App {
         self.visual_lines.clear();
         self.todos.clear();
         self.message_line_map.clear();
+        self.tool_line_map.clear();
+        self.expanded_tool_calls.clear();
         self.esc_hint_until = None;
         self.context_menu.close();
         self.pending_question = None;

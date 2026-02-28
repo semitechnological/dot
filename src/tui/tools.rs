@@ -117,6 +117,7 @@ impl ToolCategory {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ToolCallDisplay {
     pub name: String,
     pub input: String,
@@ -124,6 +125,12 @@ pub struct ToolCallDisplay {
     pub is_error: bool,
     pub category: ToolCategory,
     pub detail: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum StreamSegment {
+    Text(String),
+    ToolCall(ToolCallDisplay),
 }
 
 pub fn extract_tool_detail(name: &str, input: &str) -> String {

@@ -314,11 +314,7 @@ impl Agent {
     }
 
     fn title_model(&self) -> &str {
-        match self.provider().name() {
-            "anthropic" => "claude-3-5-haiku-20241022",
-            "openai" => "gpt-5-nano",
-            _ => self.provider().model(),
-        }
+        self.provider().model()
     }
 
     fn should_compact(&self) -> bool {
@@ -441,6 +437,14 @@ impl Agent {
             content: blocks,
         });
         let title_rx = if self.messages.len() == 1 {
+            let preview: String = content.chars().take(50).collect();
+            let preview = preview.trim().to_string();
+            if !preview.is_empty() {
+                let _ = self
+                    .db
+                    .update_conversation_title(&self.conversation_id, &preview);
+                let _ = event_tx.send(AgentEvent::TitleGenerated(preview));
+            }
             let title_messages = vec![Message {
                 role: Role::User,
                 content: vec![ContentBlock::Text(format!(
@@ -448,7 +452,8 @@ impl Agent {
                     content
                 ))],
             }];
-            self.provider()
+            match self
+                .provider()
                 .stream_with_model(
                     self.title_model(),
                     &title_messages,
@@ -458,7 +463,13 @@ impl Agent {
                     0,
                 )
                 .await
-                .ok()
+            {
+                Ok(rx) => Some(rx),
+                Err(e) => {
+                    tracing::warn!("title generation stream failed: {e}");
+                    None
+                }
+            }
         } else {
             None
         };
@@ -983,31 +994,58 @@ impl Agent {
             });
         }
 
-        if let Some(mut rx) = title_rx {
+        let title = if let Some(mut rx) = title_rx {
             let mut raw = String::new();
             while let Some(event) = rx.recv().await {
-                if let StreamEventType::TextDelta(text) = event.event_type {
-                    raw.push_str(&text);
+                match event.event_type {
+                    StreamEventType::TextDelta(text) => raw.push_str(&text),
+                    StreamEventType::Error(e) => {
+                        tracing::warn!("title stream error: {e}");
+                    }
+                    _ => {}
                 }
             }
-            let title = raw
+            let t = raw
                 .trim()
                 .trim_matches('"')
                 .trim_matches('`')
                 .trim_matches('*')
                 .replace('\n', " ");
-            let title: String = title.chars().take(50).collect();
-            if !title.is_empty() {
-                let _ = self
-                    .db
-                    .update_conversation_title(&self.conversation_id, &title);
-                let _ = event_tx.send(AgentEvent::TitleGenerated(title.clone()));
-                {
-                    let mut ctx = self.event_context(&Event::OnTitleGenerated);
-                    ctx.title = Some(title);
-                    self.hooks.emit(&Event::OnTitleGenerated, &ctx);
-                }
+            let t: String = t.chars().take(50).collect();
+            if t.is_empty() {
+                tracing::warn!("title stream returned empty text");
+                None
+            } else {
+                Some(t)
             }
+        } else {
+            None
+        };
+        let fallback = || -> String {
+            self.messages
+                .first()
+                .and_then(|m| {
+                    m.content.iter().find_map(|b| {
+                        if let ContentBlock::Text(t) = b {
+                            let s: String = t.chars().take(50).collect();
+                            let s = s.trim().to_string();
+                            if s.is_empty() { None } else { Some(s) }
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or_else(|| "Chat".to_string())
+        };
+        let title = title.unwrap_or_else(fallback);
+        let _ = self
+            .db
+            .update_conversation_title(&self.conversation_id, &title);
+        let _ = event_tx.send(AgentEvent::TitleGenerated(title.clone()));
+        {
+            let mut ctx = self.event_context(&Event::OnTitleGenerated);
+            ctx.title = Some(title);
+            self.hooks.emit(&Event::OnTitleGenerated, &ctx);
         }
 
         Ok(())

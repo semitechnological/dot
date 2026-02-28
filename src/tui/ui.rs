@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::style::Color;
@@ -215,16 +217,20 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let mut all_lines: Vec<Line<'static>> = Vec::new();
     let mut line_to_msg: Vec<usize> = Vec::new();
+    let mut line_to_tool: Vec<Option<(usize, usize)>> = Vec::new();
 
     for (msg_idx, msg) in app.messages.iter().enumerate() {
         let before = all_lines.len();
         render_message(
             msg,
+            msg_idx,
             &app.theme,
             app.thinking_expanded,
             inner.width,
             area.width,
             &mut all_lines,
+            &mut line_to_tool,
+            &app.expanded_tool_calls,
         );
         let after = all_lines.len();
         for _ in before..after {
@@ -236,6 +242,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         let pad = if inner.width < 55 { "  " } else { "    " };
         all_lines.push(Line::from(""));
         line_to_msg.push(app.messages.len().saturating_sub(1));
+        line_to_tool.push(None);
         let done = app
             .todos
             .iter()
@@ -248,6 +255,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             Span::styled("tasks", app.theme.dim),
         ]));
         line_to_msg.push(app.messages.len().saturating_sub(1));
+        line_to_tool.push(None);
         for todo in &app.todos {
             let (icon, style) = match todo.status {
                 TodoStatus::Completed => ("\u{25c6}", app.theme.tool_success),
@@ -259,15 +267,17 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(todo.content.clone(), style),
             ]));
             line_to_msg.push(app.messages.len().saturating_sub(1));
+            line_to_tool.push(None);
         }
     }
 
     if app.is_streaming {
         let before_stream = all_lines.len();
-        ui_tools::render_streaming_state(app, inner.width, &mut all_lines);
+        ui_tools::render_streaming_state(app, inner.width, area.width, &mut all_lines);
         let stream_msg_idx = app.messages.len().saturating_sub(1).max(0);
         for _ in before_stream..all_lines.len() {
             line_to_msg.push(stream_msg_idx);
+            line_to_tool.push(None);
         }
     }
 
@@ -280,31 +290,34 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             StatusLevel::Success => ("\u{2714}", app.theme.tool_success),
         };
         all_lines.push(Line::from(""));
+        line_to_tool.push(None);
         all_lines.push(Line::from(vec![
             Span::styled(format!("    {} ", icon), style),
             Span::styled(status.text.clone(), style),
         ]));
+        line_to_tool.push(None);
     }
 
     if all_lines.is_empty() {
-        all_lines.extend(ui_popups::draw_empty_state(app, inner.width));
+        let empty_lines = ui_popups::draw_empty_state(app, inner.width);
+        for _ in &empty_lines {
+            line_to_tool.push(None);
+        }
+        all_lines.extend(empty_lines);
     }
 
-    let total_visual: u32 = all_lines
-        .iter()
-        .map(|l| {
-            if inner.width == 0 {
-                return 1u32;
-            }
-            let chars: usize = l.spans.iter().map(|s| s.content.chars().count()).sum();
-            if chars == 0 {
-                1
-            } else {
-                (chars as u32).div_ceil(inner.width as u32).max(1)
-            }
-        })
-        .sum();
-    let visible = area.height.saturating_sub(1) as u32;
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(app.theme.border);
+    let content_area = block.inner(area);
+    let wrap_width = content_area.width;
+
+    let paragraph = Paragraph::new(all_lines.clone())
+        .block(block.clone())
+        .wrap(Wrap { trim: false });
+    let total_visual = paragraph.line_count(area.width) as u32;
+
+    let visible = content_area.height as u32;
     app.max_scroll = total_visual.saturating_sub(visible).min(u16::MAX as u32) as u16;
     if app.follow_bottom {
         app.scroll_position = app.max_scroll as f64;
@@ -316,12 +329,9 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     app.content_width = area.width;
-    app.visual_lines = compute_visual_lines(&all_lines, inner.width);
-    app.message_line_map = expand_line_to_msg(&all_lines, &line_to_msg, inner.width);
-
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(app.theme.border);
+    app.visual_lines = compute_visual_lines(&all_lines, wrap_width);
+    app.message_line_map = expand_line_to_msg(&all_lines, &line_to_msg, wrap_width);
+    app.tool_line_map = expand_line_to_tool(&all_lines, &line_to_tool, wrap_width);
 
     let paragraph = Paragraph::new(all_lines)
         .block(block)
@@ -367,17 +377,21 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_message(
     msg: &ChatMessage,
+    msg_idx: usize,
     theme: &Theme,
     thinking_expanded: bool,
     inner_width: u16,
     render_width: u16,
     lines: &mut Vec<Line<'static>>,
+    line_to_tool: &mut Vec<Option<(usize, usize)>>,
+    expanded_tool_calls: &HashSet<(usize, usize)>,
 ) {
     let compact = inner_width < 55;
     let body_indent: &str = if compact { "  " } else { "    " };
     let body_indent_cols: u16 = if compact { 2 } else { 4 };
 
     lines.push(Line::from(""));
+    line_to_tool.push(None);
 
     match msg.role.as_str() {
         "user" => {
@@ -388,6 +402,7 @@ fn render_message(
             };
             let mut content_lines = msg.content.lines();
             if let Some(first) = content_lines.next() {
+                line_to_tool.push(None);
                 lines.push(Line::from(vec![
                     Span::styled(
                         marker,
@@ -405,6 +420,7 @@ fn render_message(
                 ]));
             }
             for text_line in content_lines {
+                line_to_tool.push(None);
                 lines.push(Line::from(Span::styled(
                     format!("{}{}", cont, text_line),
                     theme.user_text,
@@ -414,6 +430,7 @@ fn render_message(
         "compact" => {
             let pad = if compact { " " } else { "  " };
             for text_line in msg.content.lines() {
+                line_to_tool.push(None);
                 lines.push(Line::from(vec![
                     Span::styled(pad, theme.thinking),
                     Span::styled(text_line.to_string(), theme.dim),
@@ -428,46 +445,130 @@ fn render_message(
             };
             let model_label = msg.model.as_deref().map(shorten_model).unwrap_or_default();
             if model_label.is_empty() {
+                line_to_tool.push(None);
                 lines.push(Line::from(Span::styled(
                     diamond,
                     Style::default().fg(theme.accent),
                 )));
             } else {
+                line_to_tool.push(None);
                 lines.push(Line::from(vec![
                     Span::styled(diamond_sp, Style::default().fg(theme.accent)),
                     Span::styled(model_label, theme.dim),
                 ]));
             }
             if let Some(ref thinking) = msg.thinking {
-                render_thinking_block(thinking, thinking_expanded, theme, compact, lines);
+                render_thinking_block(
+                    thinking,
+                    thinking_expanded,
+                    theme,
+                    compact,
+                    lines,
+                    line_to_tool,
+                );
             }
-            if !msg.tool_calls.is_empty() && msg.content.is_empty() {
-                ui_tools::render_tool_calls(&msg.tool_calls, theme, compact, lines);
-            }
-            let md_lines = markdown::render_markdown(
-                &msg.content,
-                theme,
-                inner_width.saturating_sub(body_indent_cols),
-            );
-            for line in md_lines {
-                let bg = line.spans.first().and_then(|s| s.style.bg);
-                let indent_style = bg.map(|c| Style::default().bg(c)).unwrap_or_default();
-                let mut padded = vec![Span::styled(body_indent, indent_style)];
-                padded.extend(line.spans);
-                if let Some(bg_color) = bg {
-                    let used: usize = padded.iter().map(|s| s.content.chars().count()).sum();
-                    let target = render_width as usize;
-                    if used < target {
-                        padded.push(Span::styled(
-                            " ".repeat(target - used),
-                            Style::default().bg(bg_color),
-                        ));
+            if let Some(ref segments) = msg.segments {
+                let mut prev_was_tool = false;
+                let mut tool_idx = 0;
+                for seg in segments {
+                    match seg {
+                        crate::tui::tools::StreamSegment::Text(t) => {
+                            if prev_was_tool {
+                                lines.push(Line::from(""));
+                                line_to_tool.push(None);
+                            }
+                            let md_lines = markdown::render_markdown(
+                                t,
+                                theme,
+                                inner_width.saturating_sub(body_indent_cols),
+                            );
+                            for line in md_lines {
+                                let bg = line.spans.first().and_then(|s| s.style.bg);
+                                let indent_style =
+                                    bg.map(|c| Style::default().bg(c)).unwrap_or_default();
+                                let mut padded = vec![Span::styled(body_indent, indent_style)];
+                                padded.extend(line.spans);
+                                if let Some(bg_color) = bg {
+                                    let used: usize =
+                                        padded.iter().map(|s| s.content.chars().count()).sum();
+                                    let target = render_width as usize;
+                                    if used < target {
+                                        padded.push(Span::styled(
+                                            " ".repeat(target - used),
+                                            Style::default().bg(bg_color),
+                                        ));
+                                    }
+                                }
+                                lines.push(Line::from(padded));
+                                line_to_tool.push(None);
+                            }
+                            prev_was_tool = false;
+                        }
+                        crate::tui::tools::StreamSegment::ToolCall(tc) => {
+                            if !prev_was_tool && !lines.is_empty() {
+                                lines.push(Line::from(""));
+                                line_to_tool.push(None);
+                            }
+                            ui_tools::render_tool_calls_compact(
+                                std::slice::from_ref(tc),
+                                theme,
+                                compact,
+                                lines,
+                                Some(line_to_tool),
+                                msg_idx,
+                                |_| expanded_tool_calls.contains(&(msg_idx, tool_idx)),
+                            );
+                            tool_idx += 1;
+                            prev_was_tool = true;
+                        }
                     }
                 }
-                lines.push(Line::from(padded));
-            }
-            if !msg.tool_calls.is_empty() && !msg.content.is_empty() {
-                ui_tools::render_tool_calls_compact(&msg.tool_calls, theme, compact, lines);
+            } else {
+                if !msg.tool_calls.is_empty() && msg.content.is_empty() {
+                    ui_tools::render_tool_calls(
+                        &msg.tool_calls,
+                        theme,
+                        compact,
+                        lines,
+                        Some(line_to_tool),
+                        msg_idx,
+                        |i| expanded_tool_calls.contains(&(msg_idx, i)),
+                    );
+                }
+                let md_lines = markdown::render_markdown(
+                    &msg.content,
+                    theme,
+                    inner_width.saturating_sub(body_indent_cols),
+                );
+                for line in md_lines {
+                    let bg = line.spans.first().and_then(|s| s.style.bg);
+                    let indent_style = bg.map(|c| Style::default().bg(c)).unwrap_or_default();
+                    let mut padded = vec![Span::styled(body_indent, indent_style)];
+                    padded.extend(line.spans);
+                    if let Some(bg_color) = bg {
+                        let used: usize = padded.iter().map(|s| s.content.chars().count()).sum();
+                        let target = render_width as usize;
+                        if used < target {
+                            padded.push(Span::styled(
+                                " ".repeat(target - used),
+                                Style::default().bg(bg_color),
+                            ));
+                        }
+                    }
+                    lines.push(Line::from(padded));
+                    line_to_tool.push(None);
+                }
+                if !msg.tool_calls.is_empty() && !msg.content.is_empty() {
+                    ui_tools::render_tool_calls_compact(
+                        &msg.tool_calls,
+                        theme,
+                        compact,
+                        lines,
+                        Some(line_to_tool),
+                        msg_idx,
+                        |i| expanded_tool_calls.contains(&(msg_idx, i)),
+                    );
+                }
             }
         }
     }
@@ -479,10 +580,12 @@ fn render_thinking_block(
     theme: &crate::tui::theme::Theme,
     compact: bool,
     lines: &mut Vec<Line<'static>>,
+    line_to_tool: &mut Vec<Option<(usize, usize)>>,
 ) {
     let pad = if compact { "  " } else { "    " };
     let word_count = thinking.split_whitespace().count();
     if expanded {
+        line_to_tool.push(None);
         lines.push(Line::from(vec![
             Span::styled(format!("{}\u{25be} ", pad), theme.thinking),
             Span::styled(
@@ -494,6 +597,7 @@ fn render_thinking_block(
             Span::styled(format!(" \u{00b7} {}w", word_count), theme.dim),
         ]));
         for text_line in thinking.lines() {
+            line_to_tool.push(None);
             lines.push(Line::from(vec![
                 Span::styled(format!("{}\u{2502} ", pad), theme.thinking),
                 Span::styled(
@@ -504,8 +608,10 @@ fn render_thinking_block(
                 ),
             ]));
         }
+        line_to_tool.push(None);
         lines.push(Line::from(Span::styled(pad.to_string(), theme.thinking)));
     } else {
+        line_to_tool.push(None);
         let hint = if word_count > 10 {
             format!(" \u{00b7} {}w", word_count)
         } else {
@@ -927,6 +1033,31 @@ fn blend_color(fg: Color, bg: Color, t: f32) -> Color {
     )
 }
 
+fn expand_line_to_tool(
+    lines: &[Line],
+    line_to_tool: &[Option<(usize, usize)>],
+    width: u16,
+) -> Vec<Option<(usize, usize)>> {
+    let mut result = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let tool = line_to_tool.get(i).copied().flatten();
+        if width == 0 {
+            result.push(tool);
+        } else {
+            let w = line.width();
+            let wrapped = if w == 0 {
+                1
+            } else {
+                (w as u32).div_ceil(width as u32).max(1)
+            };
+            for j in 0..wrapped {
+                result.push(if j == 0 { tool } else { None });
+            }
+        }
+    }
+    result
+}
+
 fn expand_line_to_msg(lines: &[Line], line_to_msg: &[usize], width: u16) -> Vec<usize> {
     let mut result = Vec::new();
     for (i, line) in lines.iter().enumerate() {
@@ -934,11 +1065,11 @@ fn expand_line_to_msg(lines: &[Line], line_to_msg: &[usize], width: u16) -> Vec<
         if width == 0 {
             result.push(msg_idx);
         } else {
-            let chars: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            let wrapped = if chars == 0 {
+            let w = line.width();
+            let wrapped = if w == 0 {
                 1
             } else {
-                (chars as u32).div_ceil(width as u32).max(1)
+                (w as u32).div_ceil(width as u32).max(1)
             };
             for _ in 0..wrapped {
                 result.push(msg_idx);

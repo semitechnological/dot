@@ -60,6 +60,7 @@ pub fn render_markdown(text: &str, theme: &Theme, width: u16) -> Vec<Line<'stati
     let mut in_code_block = false;
     let mut code_lang = String::new();
     let mut code_lines: Vec<String> = Vec::new();
+    let mut just_closed_code = false;
 
     for raw_line in text.lines() {
         if raw_line.starts_with("```") {
@@ -68,6 +69,7 @@ pub fn render_markdown(text: &str, theme: &Theme, width: u16) -> Vec<Line<'stati
                 code_lines.clear();
                 code_lang.clear();
                 in_code_block = false;
+                just_closed_code = true;
             } else {
                 in_code_block = true;
                 code_lang = raw_line.trim_start_matches('`').trim().to_string();
@@ -81,9 +83,13 @@ pub fn render_markdown(text: &str, theme: &Theme, width: u16) -> Vec<Line<'stati
         }
 
         if raw_line.is_empty() {
+            if just_closed_code {
+                continue;
+            }
             lines.push(Line::from(""));
             continue;
         }
+        just_closed_code = false;
 
         if let Some(heading) = raw_line.strip_prefix("### ") {
             lines.push(Line::from(Span::styled(
@@ -195,7 +201,6 @@ fn render_code_block(
     let pad = "  ";
     let pad_len = 2;
 
-    // Helper: pad a line to full width with bg fill
     let fill = |content_len: usize| -> String { " ".repeat(w.saturating_sub(content_len)) };
 
     // Top line: language badge or blank, all on code_bg

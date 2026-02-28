@@ -4,15 +4,27 @@ use ratatui::text::{Line, Span};
 use crate::tui::app::App;
 use crate::tui::markdown;
 use crate::tui::theme::Theme;
-use crate::tui::tools::{ToolCallDisplay, ToolCategory, extract_tool_detail};
+use crate::tui::tools::{StreamSegment, ToolCallDisplay, ToolCategory, extract_tool_detail};
 
 pub fn render_tool_calls(
     tool_calls: &[ToolCallDisplay],
     theme: &Theme,
     compact: bool,
     lines: &mut Vec<Line<'static>>,
+    line_to_tool: Option<&mut Vec<Option<(usize, usize)>>>,
+    msg_idx: usize,
+    is_expanded: impl Fn(usize) -> bool,
 ) {
-    render_tool_calls_inner(tool_calls, theme, compact, lines, true);
+    render_tool_calls_inner(
+        tool_calls,
+        theme,
+        compact,
+        lines,
+        true,
+        is_expanded,
+        line_to_tool,
+        msg_idx,
+    );
 }
 
 pub fn render_tool_calls_compact(
@@ -20,8 +32,20 @@ pub fn render_tool_calls_compact(
     theme: &Theme,
     compact: bool,
     lines: &mut Vec<Line<'static>>,
+    line_to_tool: Option<&mut Vec<Option<(usize, usize)>>>,
+    msg_idx: usize,
+    is_expanded: impl Fn(usize) -> bool,
 ) {
-    render_tool_calls_inner(tool_calls, theme, compact, lines, false);
+    render_tool_calls_inner(
+        tool_calls,
+        theme,
+        compact,
+        lines,
+        false,
+        is_expanded,
+        line_to_tool,
+        msg_idx,
+    );
 }
 
 fn render_tool_calls_inner(
@@ -30,11 +54,14 @@ fn render_tool_calls_inner(
     compact: bool,
     lines: &mut Vec<Line<'static>>,
     show_verbose_output: bool,
+    is_expanded: impl Fn(usize) -> bool,
+    mut line_to_tool: Option<&mut Vec<Option<(usize, usize)>>>,
+    msg_idx: usize,
 ) {
     let hdr_pad = if compact { "  " } else { "    " };
     let out_pad = if compact { "      " } else { "          " };
 
-    for tc in tool_calls {
+    for (tool_idx, tc) in tool_calls.iter().enumerate() {
         let cat_style = tool_category_style(&tc.category, theme);
         let label = tc.category.label();
         let (status_icon, status_style) = if tc.is_error {
@@ -105,6 +132,9 @@ fn render_tool_calls_inner(
         }
 
         lines.push(Line::from(header_spans));
+        if let Some(ref mut ltt) = line_to_tool {
+            ltt.push(Some((msg_idx, tool_idx)));
+        }
 
         let should_show = if tc.is_error {
             true
@@ -117,17 +147,23 @@ fn render_tool_calls_inner(
             !matches!(tc.category, ToolCategory::FileRead)
         };
 
+        let expanded = is_expanded(tool_idx);
         if let Some(ref output) = tc.output
             && should_show
             && !output.is_empty()
         {
-            let max_lines = if tc.is_error { 6 } else { 4 };
-            let max_chars = 400;
-            let preview: String = output.chars().take(max_chars).collect();
-            let trimmed = if output.len() > max_chars {
-                format!("{}\u{2026}", preview)
+            let (max_lines, max_chars) = if expanded {
+                (usize::MAX, usize::MAX)
+            } else if tc.is_error {
+                (6, 400)
             } else {
-                preview
+                (4, 400)
+            };
+            let preview: String = output.chars().take(max_chars).collect();
+            let trimmed = if expanded || output.len() <= max_chars {
+                preview.clone()
+            } else {
+                format!("{}\u{2026}", preview)
             };
 
             let output_style = if tc.is_error {
@@ -141,9 +177,12 @@ fn render_tool_calls_inner(
                     format!("{}{}", out_pad, ol),
                     output_style,
                 )));
+                if let Some(ref mut ltt) = line_to_tool {
+                    ltt.push(None);
+                }
             }
             let total_lines_in_output = trimmed.lines().count();
-            if total_lines_in_output > max_lines || output.len() > max_chars {
+            if !expanded && (total_lines_in_output > max_lines || output.len() > max_chars) {
                 lines.push(Line::from(Span::styled(
                     format!(
                         "{}\u{2026} {} more lines",
@@ -152,20 +191,28 @@ fn render_tool_calls_inner(
                     ),
                     theme.dim,
                 )));
+                if let Some(ref mut ltt) = line_to_tool {
+                    ltt.push(None);
+                }
             }
         }
     }
 }
 
-pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'static>>) {
+pub fn render_streaming_state(
+    app: &App,
+    width: u16,
+    render_width: u16,
+    lines: &mut Vec<Line<'static>>,
+) {
     let compact = width < 55;
     let pad = if compact { "  " } else { "    " };
     let pad_cols: u16 = if compact { 2 } else { 4 };
     let diamond_sp = if compact { " \u{25c6} " } else { "  \u{25c6} " };
 
+    let has_segments = !app.streaming_segments.is_empty();
     let has_text = !app.current_response.is_empty();
     let has_tool = app.pending_tool_name.is_some();
-    let has_completed_tools = !app.current_tool_calls.is_empty();
 
     let model_label = super::ui::shorten_model(&app.model_name);
     let model_header = vec![
@@ -173,105 +220,144 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
         Span::styled(model_label, app.theme.dim),
     ];
 
-    if has_completed_tools && !has_text {
+    if has_segments || has_text || has_tool {
         lines.push(Line::from(""));
         lines.push(Line::from(model_header.clone()));
-        render_tool_calls(&app.current_tool_calls, &app.theme, compact, lines);
-    }
 
-    if has_text {
-        if !has_completed_tools {
-            lines.push(Line::from(""));
-            lines.push(Line::from(model_header.clone()));
-        }
-
-        if has_completed_tools {
-            render_tool_calls_compact(&app.current_tool_calls, &app.theme, compact, lines);
-            lines.push(Line::from(""));
-        }
-
-        let md_lines = markdown::render_markdown(
-            &app.current_response,
-            &app.theme,
-            width.saturating_sub(pad_cols),
-        );
-        for line in md_lines {
-            let mut padded = vec![Span::raw(pad)];
-            padded.extend(line.spans);
-            lines.push(Line::from(padded));
-        }
-        let blink = (app.tick_count / 32).is_multiple_of(2);
-        if blink {
-            lines.push(Line::from(Span::styled(
-                format!("{}\u{258d}", pad),
-                Style::default().fg(app.theme.accent),
-            )));
-        } else {
-            lines.push(Line::from(Span::raw(pad)));
-        }
-    } else if has_tool {
-        if !has_completed_tools {
-            lines.push(Line::from(""));
-            lines.push(Line::from(model_header.clone()));
-        }
-
-        let tool_name = app.pending_tool_name.as_deref().unwrap_or("");
-        let category = ToolCategory::from_name(tool_name);
-        let detail = extract_tool_detail(tool_name, &app.pending_tool_input);
-
-        let cat_style = tool_category_style(&category, &app.theme);
-        let frames = [
-            "\u{25cb}", "\u{25d4}", "\u{25d1}", "\u{25d5}", "\u{25cf}", "\u{25d5}", "\u{25d1}",
-            "\u{25d4}",
-        ];
-        let idx = (app.tick_count / 8 % frames.len() as u64) as usize;
-        let intent = category.intent();
-        let mut tool_spans = vec![
-            Span::styled(format!("{}{} ", pad, frames[idx]), cat_style),
-            Span::styled(format!("{} ", intent), cat_style),
-        ];
-
-        if !detail.is_empty() {
-            match &category {
-                ToolCategory::FileRead
-                | ToolCategory::FileWrite
-                | ToolCategory::MultiEdit
-                | ToolCategory::Directory => {
-                    tool_spans.push(Span::styled(detail, app.theme.tool_path));
+        let mut prev_was_tool = false;
+        for seg in &app.streaming_segments {
+            match seg {
+                StreamSegment::Text(t) => {
+                    if prev_was_tool {
+                        lines.push(Line::from(""));
+                    }
+                    let md_lines =
+                        markdown::render_markdown(t, &app.theme, width.saturating_sub(pad_cols));
+                    for line in md_lines {
+                        let bg = line.spans.first().and_then(|s| s.style.bg);
+                        let indent_style =
+                            bg.map(|c| Style::default().bg(c)).unwrap_or_default();
+                        let mut padded = vec![Span::styled(pad, indent_style)];
+                        padded.extend(line.spans);
+                        if let Some(c) = bg {
+                            let used: usize =
+                                padded.iter().map(|s| s.content.chars().count()).sum();
+                            let target = render_width as usize;
+                            if used < target {
+                                padded.push(Span::styled(
+                                    " ".repeat(target - used),
+                                    Style::default().bg(c),
+                                ));
+                            }
+                        }
+                        lines.push(Line::from(padded));
+                    }
+                    prev_was_tool = false;
                 }
-                ToolCategory::Command => {
-                    tool_spans.push(Span::styled(format!("$ {}", detail), app.theme.dim));
+                StreamSegment::ToolCall(tc) => {
+                    if !prev_was_tool && !lines.is_empty() {
+                        lines.push(Line::from(""));
+                    }
+                    render_tool_calls_compact(
+                        std::slice::from_ref(tc),
+                        &app.theme,
+                        compact,
+                        lines,
+                        None,
+                        0,
+                        |_| false,
+                    );
+                    prev_was_tool = true;
                 }
-                ToolCategory::Mcp { .. } => {
-                    let mcp_tool = tool_name.split('_').skip(1).collect::<Vec<_>>().join("_");
-                    tool_spans.push(Span::styled(mcp_tool, app.theme.tool_name));
-                    if !detail.is_empty() {
-                        tool_spans.push(Span::raw(" "));
+            }
+        }
+
+        if has_text {
+            if prev_was_tool {
+                lines.push(Line::from(""));
+            }
+            let md_lines = markdown::render_markdown(
+                &app.current_response,
+                &app.theme,
+                width.saturating_sub(pad_cols),
+            );
+            for line in md_lines {
+                let bg = line.spans.first().and_then(|s| s.style.bg);
+                let indent_style = bg.map(|c| Style::default().bg(c)).unwrap_or_default();
+                let mut padded = vec![Span::styled(pad, indent_style)];
+                padded.extend(line.spans);
+                if let Some(c) = bg {
+                    let used: usize =
+                        padded.iter().map(|s| s.content.chars().count()).sum();
+                    let target = render_width as usize;
+                    if used < target {
+                        padded.push(Span::styled(
+                            " ".repeat(target - used),
+                            Style::default().bg(c),
+                        ));
+                    }
+                }
+                lines.push(Line::from(padded));
+            }
+        } else if has_tool {
+            let tool_name = app.pending_tool_name.as_deref().unwrap_or("");
+            let category = ToolCategory::from_name(tool_name);
+            let detail = extract_tool_detail(tool_name, &app.pending_tool_input);
+
+            let cat_style = tool_category_style(&category, &app.theme);
+            let frames = [
+                "\u{25cb}", "\u{25d4}", "\u{25d1}", "\u{25d5}", "\u{25cf}", "\u{25d5}", "\u{25d1}",
+                "\u{25d4}",
+            ];
+            let idx = (app.tick_count / 8 % frames.len() as u64) as usize;
+            let intent = category.intent();
+            let mut tool_spans = vec![
+                Span::styled(format!("{}{} ", pad, frames[idx]), cat_style),
+                Span::styled(format!("{} ", intent), cat_style),
+            ];
+
+            if !detail.is_empty() {
+                match &category {
+                    ToolCategory::FileRead
+                    | ToolCategory::FileWrite
+                    | ToolCategory::MultiEdit
+                    | ToolCategory::Directory => {
+                        tool_spans.push(Span::styled(detail, app.theme.tool_path));
+                    }
+                    ToolCategory::Command => {
+                        tool_spans.push(Span::styled(format!("$ {}", detail), app.theme.dim));
+                    }
+                    ToolCategory::Mcp { .. } => {
+                        let mcp_tool = tool_name.split('_').skip(1).collect::<Vec<_>>().join("_");
+                        tool_spans.push(Span::styled(mcp_tool, app.theme.tool_name));
+                        if !detail.is_empty() {
+                            tool_spans.push(Span::raw(" "));
+                            tool_spans.push(Span::styled(detail, app.theme.dim));
+                        }
+                    }
+                    _ => {
                         tool_spans.push(Span::styled(detail, app.theme.dim));
                     }
                 }
-                _ => {
-                    tool_spans.push(Span::styled(detail, app.theme.dim));
-                }
+            } else {
+                tool_spans.push(Span::styled(tool_name.to_string(), app.theme.tool_name));
             }
-        } else {
-            tool_spans.push(Span::styled(tool_name.to_string(), app.theme.tool_name));
-        }
 
-        if has_completed_tools {
-            let n = app.current_tool_calls.len();
-            tool_spans.push(Span::styled(format!(" \u{00b7} {} done", n), app.theme.dim));
-        }
+            if has_segments {
+                let n = app.current_tool_calls.len();
+                tool_spans.push(Span::styled(format!(" \u{00b7} {} done", n), app.theme.dim));
+            }
 
-        if let Some(elapsed) = app.streaming_elapsed_secs() {
-            tool_spans.push(Span::styled(
-                format!(" \u{00b7} {}", super::ui::format_elapsed(elapsed)),
-                app.theme.dim,
-            ));
-        }
+            if let Some(elapsed) = app.streaming_elapsed_secs() {
+                tool_spans.push(Span::styled(
+                    format!(" \u{00b7} {}", super::ui::format_elapsed(elapsed)),
+                    app.theme.dim,
+                ));
+            }
 
-        lines.push(Line::from(tool_spans));
-    } else if !has_completed_tools {
+            lines.push(Line::from(tool_spans));
+        }
+    } else {
         lines.push(Line::from(""));
         lines.push(Line::from(model_header.clone()));
         let frames = [

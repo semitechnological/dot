@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use dot::auth::ProviderCredential;
@@ -392,7 +394,7 @@ fn build_provider_from_def(
 fn build_hooks(config: &dot::config::Config) -> dot::extension::HookRegistry {
     let mut registry = dot::extension::HookRegistry::new();
     for (event_name, cfg) in &config.hooks {
-        if let Some(event) = dot::extension::Event::from_str(event_name) {
+        if let Ok(event) = dot::extension::Event::from_str(event_name) {
             registry.register(dot::extension::Hook {
                 event,
                 command: cfg.command.clone(),

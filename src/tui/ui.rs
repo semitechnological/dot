@@ -271,19 +271,19 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    if let Some(ref status) = app.status_message {
-        if !status.expired() {
-            let (icon, style) = match status.level {
-                StatusLevel::Error => ("\u{2718}", app.theme.error),
-                StatusLevel::Info => ("\u{25cb}", app.theme.dim),
-                StatusLevel::Success => ("\u{2714}", app.theme.tool_success),
-            };
-            all_lines.push(Line::from(""));
-            all_lines.push(Line::from(vec![
-                Span::styled(format!("    {} ", icon), style),
-                Span::styled(status.text.clone(), style),
-            ]));
-        }
+    if let Some(ref status) = app.status_message
+        && !status.expired()
+    {
+        let (icon, style) = match status.level {
+            StatusLevel::Error => ("\u{2718}", app.theme.error),
+            StatusLevel::Info => ("\u{25cb}", app.theme.dim),
+            StatusLevel::Success => ("\u{2714}", app.theme.tool_success),
+        };
+        all_lines.push(Line::from(""));
+        all_lines.push(Line::from(vec![
+            Span::styled(format!("    {} ", icon), style),
+            Span::styled(status.text.clone(), style),
+        ]));
     }
 
     if all_lines.is_empty() {
@@ -441,12 +441,8 @@ fn render_message(
             if let Some(ref thinking) = msg.thinking {
                 render_thinking_block(thinking, thinking_expanded, theme, compact, lines);
             }
-            if !msg.tool_calls.is_empty() {
-                if msg.content.is_empty() {
-                    ui_tools::render_tool_calls(&msg.tool_calls, theme, compact, lines);
-                } else {
-                    ui_tools::render_tool_calls_compact(&msg.tool_calls, theme, compact, lines);
-                }
+            if !msg.tool_calls.is_empty() && msg.content.is_empty() {
+                ui_tools::render_tool_calls(&msg.tool_calls, theme, compact, lines);
             }
             let md_lines = markdown::render_markdown(
                 &msg.content,
@@ -469,6 +465,9 @@ fn render_message(
                     }
                 }
                 lines.push(Line::from(padded));
+            }
+            if !msg.tool_calls.is_empty() && !msg.content.is_empty() {
+                ui_tools::render_tool_calls_compact(&msg.tool_calls, theme, compact, lines);
             }
         }
     }

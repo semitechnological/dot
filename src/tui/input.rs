@@ -107,12 +107,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
 
     if key.code == KeyCode::Esc && app.is_streaming {
         let now = Instant::now();
-        if let Some(hint_until) = app.esc_hint_until {
-            if now < hint_until {
-                app.esc_hint_until = None;
-                app.last_escape_time = None;
-                return InputAction::CancelStream;
-            }
+        if let Some(hint_until) = app.esc_hint_until
+            && now < hint_until
+        {
+            app.esc_hint_until = None;
+            app.last_escape_time = None;
+            return InputAction::CancelStream;
         }
         app.esc_hint_until = Some(now + Duration::from_secs(3));
         app.last_escape_time = Some(now);
@@ -848,17 +848,17 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
             }
 
             if app.context_menu.visible {
-                if let Some(popup) = app.layout.context_menu {
-                    if rect_contains(popup, col, row) {
-                        let relative_row = row.saturating_sub(popup.y + 1) as usize;
-                        app.context_menu.selected = relative_row.min(1);
-                        if let Some((action, msg_idx)) = app.context_menu.confirm() {
-                            return match action {
-                                0 => InputAction::TruncateToMessage(msg_idx),
-                                1 => InputAction::ForkFromMessage(msg_idx),
-                                _ => InputAction::None,
-                            };
-                        }
+                if let Some(popup) = app.layout.context_menu
+                    && rect_contains(popup, col, row)
+                {
+                    let relative_row = row.saturating_sub(popup.y + 1) as usize;
+                    app.context_menu.selected = relative_row.min(1);
+                    if let Some((action, msg_idx)) = app.context_menu.confirm() {
+                        return match action {
+                            0 => InputAction::TruncateToMessage(msg_idx),
+                            1 => InputAction::ForkFromMessage(msg_idx),
+                            _ => InputAction::None,
+                        };
                     }
                 }
                 app.context_menu.close();

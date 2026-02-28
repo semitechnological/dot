@@ -100,16 +100,15 @@ fn strip_html(html: &str) -> String {
             }
 
             let tag: String = lower_chars[i..].iter().take(5).collect();
-            if tag.starts_with("<br")
+            if (tag.starts_with("<br")
                 || tag.starts_with("<p")
                 || tag.starts_with("<div")
                 || tag.starts_with("<h")
                 || tag.starts_with("<li")
-                || tag.starts_with("<tr")
+                || tag.starts_with("<tr"))
+                && !result.ends_with('\n')
             {
-                if !result.ends_with('\n') {
-                    result.push('\n');
-                }
+                result.push('\n');
             }
 
             in_tag = true;
@@ -130,23 +129,23 @@ fn strip_html(html: &str) -> String {
             continue;
         }
 
-        if chars[i] == '&' {
-            if let Some(semi) = html[i..].find(';') {
-                let entity = &html[i..i + semi + 1];
-                let decoded = match entity {
-                    "&amp;" => "&",
-                    "&lt;" => "<",
-                    "&gt;" => ">",
-                    "&quot;" => "\"",
-                    "&apos;" => "'",
-                    "&nbsp;" => " ",
-                    _ => " ",
-                };
-                result.push_str(decoded);
-                last_was_space = decoded == " ";
-                i += semi + 1;
-                continue;
-            }
+        if chars[i] == '&'
+            && let Some(semi) = html[i..].find(';')
+        {
+            let entity = &html[i..i + semi + 1];
+            let decoded = match entity {
+                "&amp;" => "&",
+                "&lt;" => "<",
+                "&gt;" => ">",
+                "&quot;" => "\"",
+                "&apos;" => "'",
+                "&nbsp;" => " ",
+                _ => " ",
+            };
+            result.push_str(decoded);
+            last_was_space = decoded == " ";
+            i += semi + 1;
+            continue;
         }
 
         if chars[i].is_whitespace() {

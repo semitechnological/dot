@@ -9,7 +9,7 @@ pub struct SlashCommand {
     pub name: String,
     pub description: String,
     command: String,
-    timeout: u64,
+    _timeout: u64,
 }
 
 impl SlashCommand {
@@ -18,7 +18,7 @@ impl SlashCommand {
             name: name.to_string(),
             description: cfg.description.clone(),
             command: cfg.command.clone(),
-            timeout: cfg.timeout,
+            _timeout: cfg.timeout,
         }
     }
 

@@ -58,6 +58,7 @@ pub struct Agent {
 }
 
 impl Agent {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         providers: Vec<Box<dyn Provider>>,
         db: Db,

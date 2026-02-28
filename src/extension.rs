@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::process::Command;
+use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -37,35 +38,39 @@ pub enum Event {
     OnContextLoad,
 }
 
-impl Event {
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for Event {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "session_start" => Some(Self::SessionStart),
-            "session_end" => Some(Self::SessionEnd),
-            "before_prompt" => Some(Self::BeforePrompt),
-            "after_prompt" => Some(Self::AfterPrompt),
-            "before_tool_call" => Some(Self::BeforeToolCall),
-            "after_tool_call" => Some(Self::AfterToolCall),
-            "before_compact" => Some(Self::BeforeCompact),
-            "after_compact" => Some(Self::AfterCompact),
-            "model_switch" => Some(Self::ModelSwitch),
-            "agent_switch" => Some(Self::AgentSwitch),
-            "on_error" => Some(Self::OnError),
-            "on_stream_start" => Some(Self::OnStreamStart),
-            "on_stream_end" => Some(Self::OnStreamEnd),
-            "on_resume" => Some(Self::OnResume),
-            "on_user_input" => Some(Self::OnUserInput),
-            "on_tool_error" => Some(Self::OnToolError),
-            "before_exit" => Some(Self::BeforeExit),
-            "on_thinking_start" => Some(Self::OnThinkingStart),
-            "on_thinking_end" => Some(Self::OnThinkingEnd),
-            "on_title_generated" => Some(Self::OnTitleGenerated),
-            "before_permission_check" => Some(Self::BeforePermissionCheck),
-            "on_context_load" => Some(Self::OnContextLoad),
-            _ => None,
+            "session_start" => Ok(Self::SessionStart),
+            "session_end" => Ok(Self::SessionEnd),
+            "before_prompt" => Ok(Self::BeforePrompt),
+            "after_prompt" => Ok(Self::AfterPrompt),
+            "before_tool_call" => Ok(Self::BeforeToolCall),
+            "after_tool_call" => Ok(Self::AfterToolCall),
+            "before_compact" => Ok(Self::BeforeCompact),
+            "after_compact" => Ok(Self::AfterCompact),
+            "model_switch" => Ok(Self::ModelSwitch),
+            "agent_switch" => Ok(Self::AgentSwitch),
+            "on_error" => Ok(Self::OnError),
+            "on_stream_start" => Ok(Self::OnStreamStart),
+            "on_stream_end" => Ok(Self::OnStreamEnd),
+            "on_resume" => Ok(Self::OnResume),
+            "on_user_input" => Ok(Self::OnUserInput),
+            "on_tool_error" => Ok(Self::OnToolError),
+            "before_exit" => Ok(Self::BeforeExit),
+            "on_thinking_start" => Ok(Self::OnThinkingStart),
+            "on_thinking_end" => Ok(Self::OnThinkingEnd),
+            "on_title_generated" => Ok(Self::OnTitleGenerated),
+            "before_permission_check" => Ok(Self::BeforePermissionCheck),
+            "on_context_load" => Ok(Self::OnContextLoad),
+            _ => Err(()),
         }
     }
+}
 
+impl Event {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::SessionStart => "session_start",
@@ -238,7 +243,7 @@ pub struct ScriptTool {
     tool_description: String,
     schema: Value,
     command: String,
-    timeout: u64,
+    _timeout: u64,
 }
 
 impl ScriptTool {
@@ -254,7 +259,7 @@ impl ScriptTool {
             tool_description: description,
             schema,
             command,
-            timeout,
+            _timeout: timeout,
         }
     }
 }
@@ -289,7 +294,7 @@ impl Tool for ScriptTool {
             }
         }
 
-        let output = std::process::Command::from(cmd)
+        let output = cmd
             .output()
             .with_context(|| format!("script tool '{}' failed", self.tool_name))?;
 

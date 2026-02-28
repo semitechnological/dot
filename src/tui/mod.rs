@@ -34,6 +34,7 @@ pub struct ExitInfo {
     pub title: Option<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     config: Config,
     providers: Vec<Box<dyn Provider>>,
@@ -277,13 +278,13 @@ async fn run_app(
                 )?;
                 terminal::enable_raw_mode()?;
                 terminal.clear()?;
-                if status.is_ok() {
-                    if let Ok(contents) = std::fs::read_to_string(&tmp) {
-                        let trimmed = contents.trim_end().to_string();
-                        if !trimmed.is_empty() {
-                            app.cursor_pos = trimmed.len();
-                            app.input = trimmed;
-                        }
+                if status.is_ok()
+                    && let Ok(contents) = std::fs::read_to_string(&tmp)
+                {
+                    let trimmed = contents.trim_end().to_string();
+                    if !trimmed.is_empty() {
+                        app.cursor_pos = trimmed.len();
+                        app.input = trimmed;
                     }
                 }
                 let _ = std::fs::remove_file(&tmp);

@@ -33,6 +33,7 @@ pub struct Conversation {
     pub created_at: String,
     pub updated_at: String,
     pub messages: Vec<DbMessage>,
+    pub last_input_tokens: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +84,10 @@ impl Db {
 
         let _ = self.conn.execute(
             "ALTER TABLE conversations ADD COLUMN cwd TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE conversations ADD COLUMN last_input_tokens INTEGER NOT NULL DEFAULT 0",
             [],
         );
 
@@ -169,22 +174,25 @@ impl Db {
     }
 
     pub fn get_conversation(&self, id: &str) -> Result<Conversation> {
-        let summary: ConversationSummary = self
+        let (summary, last_input_tokens) = self
             .conn
             .query_row(
-                "SELECT id, title, model, provider, cwd, created_at, updated_at \
+                "SELECT id, title, model, provider, cwd, created_at, updated_at, last_input_tokens \
                  FROM conversations WHERE id = ?1",
                 params![id],
                 |row| {
-                    Ok(ConversationSummary {
-                        id: row.get(0)?,
-                        title: row.get(1)?,
-                        model: row.get(2)?,
-                        provider: row.get(3)?,
-                        cwd: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                        created_at: row.get(5)?,
-                        updated_at: row.get(6)?,
-                    })
+                    Ok((
+                        ConversationSummary {
+                            id: row.get(0)?,
+                            title: row.get(1)?,
+                            model: row.get(2)?,
+                            provider: row.get(3)?,
+                            cwd: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                            created_at: row.get(5)?,
+                            updated_at: row.get(6)?,
+                        },
+                        row.get::<_, i64>(7).unwrap_or(0) as u32,
+                    ))
                 },
             )
             .context("Failed to get conversation")?;
@@ -199,6 +207,7 @@ impl Db {
             created_at: summary.created_at,
             updated_at: summary.updated_at,
             messages,
+            last_input_tokens,
         })
     }
 
@@ -234,6 +243,35 @@ impl Db {
             .context("Failed to delete conversation")?;
 
         tracing::debug!("Deleted conversation {}", id);
+        Ok(())
+    }
+
+    pub fn truncate_messages(&self, conversation_id: &str, keep: usize) -> Result<()> {
+        let ids: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare(
+                    "SELECT id FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
+                )
+                .context("Failed to prepare truncate query")?;
+            let rows = stmt
+                .query_map(params![conversation_id], |row| row.get::<_, String>(0))
+                .context("Failed to query messages for truncation")?;
+            let mut all = Vec::new();
+            for row in rows {
+                all.push(row.context("Failed to read message id")?);
+            }
+            all
+        };
+        let to_delete = &ids[keep.min(ids.len())..];
+        for id in to_delete {
+            self.conn
+                .execute("DELETE FROM tool_calls WHERE message_id = ?1", params![id])
+                .context("Failed to delete tool calls for truncated message")?;
+            self.conn
+                .execute("DELETE FROM messages WHERE id = ?1", params![id])
+                .context("Failed to delete truncated message")?;
+        }
         Ok(())
     }
 
@@ -287,6 +325,16 @@ impl Db {
             messages.push(row.context("Failed to read message row")?);
         }
         Ok(messages)
+    }
+
+    pub fn update_last_input_tokens(&self, conversation_id: &str, tokens: u32) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE conversations SET last_input_tokens = ?1 WHERE id = ?2",
+                params![tokens as i64, conversation_id],
+            )
+            .context("Failed to update last_input_tokens")?;
+        Ok(())
     }
 
     pub fn update_message_tokens(&self, id: &str, tokens: u32) -> Result<()> {

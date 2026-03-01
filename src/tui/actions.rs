@@ -240,6 +240,7 @@ pub async fn dispatch_action(
         InputAction::ClearConversation => app.clear_conversation(),
         InputAction::ToggleThinking => {
             app.thinking_expanded = !app.thinking_expanded;
+            app.mark_dirty();
         }
         InputAction::OpenThinkingSelector => {
             let level = app.thinking_level();
@@ -266,11 +267,60 @@ pub async fn dispatch_action(
             let mut agent_lock = agent.lock().await;
             agent_lock.truncate_messages(idx + 1);
         }
+        InputAction::RevertToMessage(idx) => {
+            let prompt = if idx < app.messages.len() && app.messages[idx].role == "user" {
+                app.messages[idx].content.clone()
+            } else if idx > 0 && app.messages[idx - 1].role == "user" {
+                app.messages[idx - 1].content.clone()
+            } else {
+                String::new()
+            };
+            app.current_response.clear();
+            app.current_thinking.clear();
+            app.current_tool_calls.clear();
+            app.streaming_segments.clear();
+            let mut agent_lock = agent.lock().await;
+            match agent_lock.revert_to_message(idx) {
+                Ok(restored) => {
+                    drop(agent_lock);
+                    app.messages.truncate(idx);
+                    app.input = prompt;
+                    app.cursor_pos = app.input.len();
+                    app.chips.clear();
+                    app.mark_dirty();
+                    app.scroll_to_bottom();
+                    let count = restored.len();
+                    if count > 0 {
+                        app.status_message = Some(app::StatusMessage::info(format!(
+                            "reverted {count} file{}",
+                            if count == 1 { "" } else { "s" }
+                        )));
+                    }
+                }
+                Err(e) => {
+                    drop(agent_lock);
+                    app.status_message =
+                        Some(app::StatusMessage::error(format!("revert failed: {e}")));
+                }
+            }
+        }
+        InputAction::CopyMessage(idx) => {
+            if idx < app.messages.len() {
+                app::copy_to_clipboard(&app.messages[idx].content);
+                app.status_message = Some(app::StatusMessage::info("copied to clipboard"));
+            }
+        }
         InputAction::ForkFromMessage(idx) => {
             let fork_messages: Vec<(String, String, Option<String>)> = app.messages[..=idx]
                 .iter()
                 .map(|m| (m.role.clone(), m.content.clone(), m.model.clone()))
                 .collect();
+            let prompt = fork_messages
+                .iter()
+                .rev()
+                .find(|(role, _, _)| role == "user")
+                .map(|(_, content, _)| content.clone())
+                .unwrap_or_default();
             let mut agent_lock = agent.lock().await;
             match agent_lock.fork_conversation(idx + 1) {
                 Ok(()) => {
@@ -286,6 +336,9 @@ pub async fn dispatch_action(
                             segments: None,
                         });
                     }
+                    app.input = prompt;
+                    app.cursor_pos = app.input.len();
+                    app.chips.clear();
                     app.scroll_to_bottom();
                 }
                 Err(e) => {

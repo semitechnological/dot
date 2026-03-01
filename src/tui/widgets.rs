@@ -680,7 +680,7 @@ impl MessageContextMenu {
     }
 
     pub fn down(&mut self) {
-        if self.selected < 1 {
+        if self.selected < Self::labels().len() - 1 {
             self.selected += 1;
         }
     }
@@ -695,7 +695,7 @@ impl MessageContextMenu {
     }
 
     pub fn labels() -> &'static [&'static str] {
-        &["continue from here", "fork from here"]
+        &["revert to message", "fork from here", "copy"]
     }
 }
 

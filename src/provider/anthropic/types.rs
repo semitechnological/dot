@@ -15,6 +15,8 @@ pub(super) struct AnthropicRequest<'a> {
     pub temperature: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_management: Option<serde_json::Value>,
 }
 
 fn convert_content_block(block: &ContentBlock) -> serde_json::Value {
@@ -54,6 +56,10 @@ fn convert_content_block(block: &ContentBlock) -> serde_json::Value {
             "type": "thinking",
             "thinking": thinking,
             "signature": signature,
+        }),
+        ContentBlock::Compaction { content } => serde_json::json!({
+            "type": "compaction",
+            "content": content,
         }),
     }
 }

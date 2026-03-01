@@ -28,6 +28,26 @@ pub struct OpenAIProvider {
     client: Client<OpenAIConfig>,
     model: String,
     cached_models: std::sync::Mutex<Option<Vec<String>>>,
+    context_windows: std::sync::Mutex<HashMap<String, u32>>,
+}
+
+fn known_context_window(model: &str) -> u32 {
+    if model.starts_with("o1") || model.starts_with("o3") || model.starts_with("o4") {
+        return 200_000;
+    }
+    if model.starts_with("gpt-4o")
+        || model.starts_with("gpt-4-turbo")
+        || model == "gpt-4-1106-preview"
+    {
+        return 128_000;
+    }
+    if model.starts_with("gpt-4") {
+        return 8_192;
+    }
+    if model.starts_with("gpt-3.5") {
+        return 16_385;
+    }
+    0
 }
 
 impl OpenAIProvider {
@@ -36,6 +56,7 @@ impl OpenAIProvider {
             client: Client::new(),
             model: model.into(),
             cached_models: std::sync::Mutex::new(None),
+            context_windows: std::sync::Mutex::new(HashMap::new()),
         }
     }
     pub fn new_with_config(config: OpenAIConfig, model: impl Into<String>) -> Self {
@@ -43,6 +64,7 @@ impl OpenAIProvider {
             client: Client::with_config(config),
             model: model.into(),
             cached_models: std::sync::Mutex::new(None),
+            context_windows: std::sync::Mutex::new(HashMap::new()),
         }
     }
 }
@@ -256,13 +278,27 @@ impl Provider for OpenAIProvider {
     }
 
     fn context_window(&self) -> u32 {
-        0
+        let cw = self.context_windows.lock().unwrap();
+        cw.get(&self.model).copied().unwrap_or(0)
     }
 
     fn fetch_context_window(
         &self,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<u32>> + Send + '_>> {
-        Box::pin(async move { Ok(0) })
+        Box::pin(async move {
+            {
+                let cw = self.context_windows.lock().unwrap();
+                if let Some(&v) = cw.get(&self.model) {
+                    return Ok(v);
+                }
+            }
+            let v = known_context_window(&self.model);
+            if v > 0 {
+                let mut cw = self.context_windows.lock().unwrap();
+                cw.insert(self.model.clone(), v);
+            }
+            Ok(v)
+        })
     }
 
     fn fetch_models(

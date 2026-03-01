@@ -7,7 +7,6 @@ use stream::process_sse_stream;
 use types::{AnthropicRequest, convert_messages, convert_tools};
 
 use std::{
-    collections::HashMap,
     future::Future,
     pin::Pin,
     time::{SystemTime, UNIX_EPOCH},
@@ -24,7 +23,6 @@ pub struct AnthropicProvider {
     model: String,
     auth: tokio::sync::Mutex<AnthropicAuth>,
     cached_models: std::sync::Mutex<Option<Vec<String>>>,
-    context_windows: std::sync::Mutex<HashMap<String, u32>>,
 }
 
 impl AnthropicProvider {
@@ -37,7 +35,6 @@ impl AnthropicProvider {
             model: model.into(),
             auth: tokio::sync::Mutex::new(AnthropicAuth::ApiKey(api_key.into())),
             cached_models: std::sync::Mutex::new(None),
-            context_windows: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -59,12 +56,11 @@ impl AnthropicProvider {
                 expires_at,
             }),
             cached_models: std::sync::Mutex::new(None),
-            context_windows: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
-    async fn fetch_model_context_window(&self, model: &str) -> anyhow::Result<u32> {
-        let auth = self.resolve_auth().await?;
+    async fn fetch_model_context_window(&self, model: &str) -> Option<u32> {
+        let auth = self.resolve_auth().await.ok()?;
         let url = format!("https://api.anthropic.com/v1/models/{model}");
         let mut req = self
             .client
@@ -79,19 +75,15 @@ impl AnthropicProvider {
                 )
                 .header("user-agent", "claude-code/2.1.49 (external, cli)");
         }
-        let resp = req.send().await.context("Failed to fetch model info")?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "Anthropic model API error {status}: {body}"
-            ));
+        let data: serde_json::Value = req.send().await.ok()?.json().await.ok()?;
+        data["context_window"].as_u64().map(|v| v as u32)
+    }
+
+    fn model_context_window(model: &str) -> u32 {
+        if model.contains("claude") {
+            return 200_000;
         }
-        let data: serde_json::Value = resp.json().await?;
-        data["context_window"]
-            .as_u64()
-            .map(|v| v as u32)
-            .ok_or_else(|| anyhow::anyhow!("context_window not found in model response"))
+        0
     }
 
     async fn resolve_auth(&self) -> anyhow::Result<AuthResolved> {
@@ -171,24 +163,21 @@ impl Provider for AnthropicProvider {
     }
 
     fn context_window(&self) -> u32 {
-        let cw = self.context_windows.lock().unwrap();
-        cw.get(&self.model).copied().unwrap_or(0)
+        Self::model_context_window(&self.model)
+    }
+
+    fn supports_server_compaction(&self) -> bool {
+        true
     }
 
     fn fetch_context_window(
         &self,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<u32>> + Send + '_>> {
         Box::pin(async move {
-            {
-                let cw = self.context_windows.lock().unwrap();
-                if let Some(&val) = cw.get(&self.model) {
-                    return Ok(val);
-                }
+            if let Some(cw) = self.fetch_model_context_window(&self.model).await {
+                return Ok(cw);
             }
-            let val = self.fetch_model_context_window(&self.model).await?;
-            let mut cw = self.context_windows.lock().unwrap();
-            cw.insert(self.model.clone(), val);
-            Ok(val)
+            Ok(Self::model_context_window(&self.model))
         })
     }
 
@@ -204,7 +193,6 @@ impl Provider for AnthropicProvider {
             }
             let auth = self.resolve_auth().await?;
             let mut all_models: Vec<String> = Vec::new();
-            let mut cw_map: HashMap<String, u32> = HashMap::new();
             let mut after_id: Option<String> = None;
 
             loop {
@@ -250,9 +238,6 @@ impl Provider for AnthropicProvider {
                     for m in arr {
                         if let Some(id) = m["id"].as_str() {
                             all_models.push(id.to_string());
-                            if let Some(cw) = m["context_window"].as_u64() {
-                                cw_map.insert(id.to_string(), cw as u32);
-                            }
                         }
                     }
                 }
@@ -275,10 +260,6 @@ impl Provider for AnthropicProvider {
             all_models.sort();
             let mut cache = self.cached_models.lock().unwrap();
             *cache = Some(all_models.clone());
-            drop(cache);
-
-            let mut cw_cache = self.context_windows.lock().unwrap();
-            *cw_cache = cw_map;
 
             Ok(all_models)
         })
@@ -342,6 +323,10 @@ impl Provider for AnthropicProvider {
                 max_tokens
             };
 
+            let context_management = Some(serde_json::json!({
+                "edits": [{ "type": "compact_20260112" }]
+            }));
+
             let body = AnthropicRequest {
                 model: &model,
                 messages: convert_messages(&messages),
@@ -351,6 +336,7 @@ impl Provider for AnthropicProvider {
                 tools: convert_tools(&tools),
                 temperature: 1.0,
                 thinking,
+                context_management,
             };
 
             let mut req_builder = self
@@ -360,16 +346,21 @@ impl Provider for AnthropicProvider {
                 .header("anthropic-version", "2023-06-01")
                 .header("content-type", "application/json");
 
+            let compact_beta = "compact-2026-01-12";
             if auth.is_oauth {
                 req_builder = req_builder
                     .header(
                         "anthropic-beta",
-                        "oauth-2025-04-20,interleaved-thinking-2025-05-14",
+                        format!("oauth-2025-04-20,interleaved-thinking-2025-05-14,{compact_beta}"),
                     )
                     .header("user-agent", "claude-code/2.1.49 (external, cli)");
             } else if thinking_budget >= 1024 {
-                req_builder =
-                    req_builder.header("anthropic-beta", "interleaved-thinking-2025-05-14");
+                req_builder = req_builder.header(
+                    "anthropic-beta",
+                    format!("interleaved-thinking-2025-05-14,{compact_beta}"),
+                );
+            } else {
+                req_builder = req_builder.header("anthropic-beta", compact_beta);
             }
 
             let response = req_builder

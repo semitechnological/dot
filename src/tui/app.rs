@@ -3,6 +3,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use ratatui::layout::Rect;
+use ratatui::text::Line;
 
 use crate::agent::{AgentEvent, QuestionResponder, TodoItem};
 use crate::tui::theme::Theme;
@@ -226,6 +227,14 @@ pub struct LayoutRects {
     pub file_picker: Option<Rect>,
 }
 
+pub struct RenderCache {
+    pub lines: Vec<Line<'static>>,
+    pub line_to_msg: Vec<usize>,
+    pub line_to_tool: Vec<Option<(usize, usize)>>,
+    pub total_visual: u32,
+    pub width: u16,
+}
+
 pub struct App {
     pub messages: Vec<ChatMessage>,
     pub input: String,
@@ -294,6 +303,9 @@ pub struct App {
     pub favorite_models: Vec<String>,
     pub file_picker: FilePicker,
     pub chips: Vec<InputChip>,
+
+    pub render_dirty: bool,
+    pub render_cache: Option<RenderCache>,
 }
 impl App {
     pub fn new(
@@ -302,7 +314,6 @@ impl App {
         agent_name: String,
         theme_name: &str,
         vim_mode: bool,
-        context_window: u32,
     ) -> Self {
         Self {
             messages: Vec::new(),
@@ -345,7 +356,7 @@ impl App {
             selection: TextSelection::default(),
             visual_lines: Vec::new(),
             content_width: 0,
-            context_window,
+            context_window: 0,
             last_input_tokens: 0,
             esc_hint_until: None,
             todos: Vec::new(),
@@ -366,7 +377,13 @@ impl App {
             favorite_models: Vec::new(),
             file_picker: FilePicker::new(),
             chips: Vec::new(),
+            render_dirty: true,
+            render_cache: None,
         }
+    }
+
+    pub fn mark_dirty(&mut self) {
+        self.render_dirty = true;
     }
 
     pub fn streaming_elapsed_secs(&self) -> Option<f64> {
@@ -489,7 +506,7 @@ impl App {
             AgentEvent::Compacting => {
                 self.messages.push(ChatMessage {
                     role: "compact".to_string(),
-                    content: "\u{26a1} compacting context\u{2026}".to_string(),
+                    content: "\u{26a1} context compacted".to_string(),
                     tool_calls: Vec::new(),
                     thinking: None,
                     model: None,
@@ -539,6 +556,7 @@ impl App {
                 });
             }
         }
+        self.mark_dirty();
     }
 
     pub fn take_input(&mut self) -> Option<String> {
@@ -588,6 +606,7 @@ impl App {
         self.streaming_segments.clear();
         self.status_message = None;
         self.scroll_to_bottom();
+        self.mark_dirty();
         Some(trimmed)
     }
 
@@ -644,6 +663,7 @@ impl App {
         self.paste_blocks.clear();
         self.chips.clear();
         self.scroll_to_bottom();
+        self.mark_dirty();
         true
     }
 
@@ -848,6 +868,8 @@ impl App {
         self.pending_question = None;
         self.pending_permission = None;
         self.message_queue.clear();
+        self.render_cache = None;
+        self.mark_dirty();
     }
 
     pub fn insert_char(&mut self, c: char) {

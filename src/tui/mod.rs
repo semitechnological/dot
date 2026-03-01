@@ -133,15 +133,6 @@ async fn run_app(
         commands,
     )?));
 
-    let context_window = {
-        let agent_lock = agent.lock().await;
-        let cw = agent_lock.fetch_context_window().await;
-        if cw == 0 {
-            tracing::warn!("Failed to fetch context window from API");
-        }
-        cw
-    };
-
     if let Some(ref id) = resume_id {
         let mut agent_lock = agent.lock().await;
         match agent_lock.get_session(id) {
@@ -160,7 +151,6 @@ async fn run_app(
         agent_name,
         &config.theme.name,
         config.tui.vim_mode,
-        context_window,
     );
     app.history = history;
     app.favorite_models = config.tui.favorite_models.clone();
@@ -192,6 +182,15 @@ async fn run_app(
                     segments: None,
                 });
             }
+            if !conv.messages.is_empty() {
+                let cw = agent_lock.context_window();
+                app.context_window = if cw > 0 {
+                    cw
+                } else {
+                    agent_lock.fetch_context_window().await
+                };
+                app.last_input_tokens = conv.last_input_tokens;
+            }
             app.scroll_to_bottom();
         }
         drop(agent_lock);
@@ -217,6 +216,15 @@ async fn run_app(
                                 app.is_streaming = false;
                             }
                             agent_rx = None;
+                            if app.context_window == 0 {
+                                let agent_lock = agent.lock().await;
+                                let cw = agent_lock.context_window();
+                                app.context_window = if cw > 0 {
+                                    cw
+                                } else {
+                                    agent_lock.fetch_context_window().await
+                                };
+                            }
                             if let Some(queued) = app.message_queue.pop_front() {
                                 let (tx, rx) = mpsc::unbounded_channel();
                                 agent_rx = Some(rx);
@@ -332,6 +340,7 @@ async fn handle_event(
             app.tick_count = app.tick_count.wrapping_add(1);
             if app.status_message.as_ref().is_some_and(|s| s.expired()) {
                 app.status_message = None;
+                app.mark_dirty();
             }
             return actions::LoopSignal::Continue;
         }

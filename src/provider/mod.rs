@@ -42,6 +42,9 @@ pub enum ContentBlock {
         thinking: String,
         signature: String,
     },
+    Compaction {
+        content: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +73,7 @@ pub enum StreamEventType {
     },
     ToolUseInputDelta(String),
     ToolUseEnd,
+    CompactionComplete(String),
     MessageStart,
     MessageEnd {
         stop_reason: StopReason,
@@ -100,6 +104,9 @@ pub trait Provider: Send + Sync {
     fn set_model(&mut self, model: String);
     fn available_models(&self) -> Vec<String>;
     fn context_window(&self) -> u32;
+    fn supports_server_compaction(&self) -> bool {
+        false
+    }
     fn fetch_context_window(
         &self,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<u32>> + Send + '_>>;

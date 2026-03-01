@@ -278,6 +278,28 @@ impl Agent {
         self.messages.truncate(target);
     }
 
+    pub fn revert_to_message(&mut self, keep: usize) -> Result<Vec<String>> {
+        let keep = keep.min(self.messages.len());
+        let checkpoint_idx = self.messages[..keep]
+            .iter()
+            .filter(|m| m.role == Role::Assistant)
+            .count();
+        self.messages.truncate(keep);
+        self.db
+            .truncate_messages(&self.conversation_id, keep)
+            .context("truncating db messages")?;
+        let restored = if checkpoint_idx > 0 {
+            let res = self.snapshots.restore_to_checkpoint(checkpoint_idx - 1)?;
+            self.snapshots.truncate_checkpoints(checkpoint_idx);
+            res
+        } else {
+            let res = self.snapshots.restore_all()?;
+            self.snapshots.truncate_checkpoints(0);
+            res
+        };
+        Ok(restored)
+    }
+
     pub fn fork_conversation(&mut self, msg_count: usize) -> Result<()> {
         let kept = self.messages[..msg_count.min(self.messages.len())].to_vec();
         self.cleanup_if_empty();
@@ -461,7 +483,7 @@ impl Agent {
             ctx.prompt = Some(content.to_string());
             self.hooks.emit(&Event::OnUserInput, &ctx);
         }
-        if self.should_compact() {
+        if !self.provider().supports_server_compaction() && self.should_compact() {
             self.compact(&event_tx).await?;
         }
         self.db
@@ -608,6 +630,7 @@ impl Agent {
             let mut full_text = String::new();
             let mut full_thinking = String::new();
             let mut full_thinking_signature = String::new();
+            let mut compaction_content: Option<String> = None;
             let mut tool_calls: Vec<PendingToolCall> = Vec::new();
             let mut current_tool_input = String::new();
             while let Some(event) = stream_rx.recv().await {
@@ -626,6 +649,10 @@ impl Agent {
                     } => {
                         full_thinking = thinking;
                         full_thinking_signature = signature;
+                    }
+                    StreamEventType::CompactionComplete(content) => {
+                        let _ = event_tx.send(AgentEvent::Compacting);
+                        compaction_content = Some(content);
                     }
                     StreamEventType::ToolUseStart { id, name } => {
                         current_tool_input.clear();
@@ -654,6 +681,9 @@ impl Agent {
                         usage,
                     } => {
                         self.last_input_tokens = usage.input_tokens;
+                        let _ = self
+                            .db
+                            .update_last_input_tokens(&self.conversation_id, usage.input_tokens);
                         final_usage = Some(usage);
                     }
 
@@ -662,6 +692,11 @@ impl Agent {
             }
 
             let mut content_blocks: Vec<ContentBlock> = Vec::new();
+            if let Some(ref summary) = compaction_content {
+                content_blocks.push(ContentBlock::Compaction {
+                    content: summary.clone(),
+                });
+            }
             if !full_thinking.is_empty() {
                 content_blocks.push(ContentBlock::Thinking {
                     thinking: full_thinking.clone(),
@@ -704,6 +739,7 @@ impl Agent {
                 ctx.prompt = Some(full_text.clone());
                 self.hooks.emit(&Event::AfterPrompt, &ctx);
             }
+            self.snapshots.checkpoint();
             if tool_calls.is_empty() {
                 let _ = event_tx.send(AgentEvent::TextComplete(full_text));
                 if let Some(usage) = final_usage {

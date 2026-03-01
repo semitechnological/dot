@@ -99,11 +99,13 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                     && rect_contains(popup, col, row)
                 {
                     let relative_row = row.saturating_sub(popup.y + 1) as usize;
-                    app.context_menu.selected = relative_row.min(1);
+                    let max = crate::tui::widgets::MessageContextMenu::labels().len() - 1;
+                    app.context_menu.selected = relative_row.min(max);
                     if let Some((action, msg_idx)) = app.context_menu.confirm() {
                         return match action {
-                            0 => InputAction::TruncateToMessage(msg_idx),
+                            0 => InputAction::RevertToMessage(msg_idx),
                             1 => InputAction::ForkFromMessage(msg_idx),
+                            2 => InputAction::CopyMessage(msg_idx),
                             _ => InputAction::None,
                         };
                     }
@@ -248,6 +250,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                         } else {
                             app.expanded_tool_calls.insert((msg_idx, tool_idx));
                         }
+                        app.mark_dirty();
                         return InputAction::None;
                     }
                     let content_col = col.saturating_sub(app.layout.messages.x);

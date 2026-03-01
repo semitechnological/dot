@@ -211,108 +211,132 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         height: area.height,
     };
 
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
-    let mut line_to_msg: Vec<usize> = Vec::new();
-    let mut line_to_tool: Vec<Option<(usize, usize)>> = Vec::new();
-
-    for (msg_idx, msg) in app.messages.iter().enumerate() {
-        let before = all_lines.len();
-        render_message(
-            msg,
-            msg_idx,
-            &MessageRenderCtx {
-                theme: &app.theme,
-                thinking_expanded: app.thinking_expanded,
-                inner_width: inner.width,
-                expanded_tool_calls: &app.expanded_tool_calls,
-            },
-            &mut all_lines,
-            &mut line_to_tool,
-        );
-        let after = all_lines.len();
-        for _ in before..after {
-            line_to_msg.push(msg_idx);
-        }
-    }
-
-    if !app.todos.is_empty() {
-        let pad = if inner.width < 55 { "  " } else { "    " };
-        all_lines.push(Line::from(""));
-        line_to_msg.push(app.messages.len().saturating_sub(1));
-        line_to_tool.push(None);
-        let done = app
-            .todos
-            .iter()
-            .filter(|t| t.status == TodoStatus::Completed)
-            .count();
-        let total = app.todos.len();
-        all_lines.push(Line::from(vec![
-            Span::styled(format!("{}  ", pad), app.theme.dim),
-            Span::styled(format!("{}/{} ", done, total), app.theme.dim),
-            Span::styled("tasks", app.theme.dim),
-        ]));
-        line_to_msg.push(app.messages.len().saturating_sub(1));
-        line_to_tool.push(None);
-        for todo in &app.todos {
-            let (icon, style) = match todo.status {
-                TodoStatus::Completed => ("\u{25c6}", app.theme.tool_success),
-                TodoStatus::InProgress => ("\u{25c8}", Style::default().fg(app.theme.accent)),
-                TodoStatus::Pending => ("\u{25c7}", app.theme.dim),
-            };
-            all_lines.push(Line::from(vec![
-                Span::styled(format!("{}  {} ", pad, icon), style),
-                Span::styled(todo.content.clone(), style),
-            ]));
-            line_to_msg.push(app.messages.len().saturating_sub(1));
-            line_to_tool.push(None);
-        }
-    }
-
-    if app.is_streaming {
-        let before_stream = all_lines.len();
-        ui_tools::render_streaming_state(app, inner.width, &mut all_lines);
-        let stream_msg_idx = app.messages.len().saturating_sub(1).max(0);
-        for _ in before_stream..all_lines.len() {
-            line_to_msg.push(stream_msg_idx);
-            line_to_tool.push(None);
-        }
-    }
-
-    if let Some(ref status) = app.status_message
-        && !status.expired()
-    {
-        let (icon, style) = match status.level {
-            StatusLevel::Error => ("\u{2718}", app.theme.error),
-            StatusLevel::Info => ("\u{25cb}", app.theme.dim),
-            StatusLevel::Success => ("\u{2714}", app.theme.tool_success),
-        };
-        all_lines.push(Line::from(""));
-        line_to_tool.push(None);
-        all_lines.push(Line::from(vec![
-            Span::styled(format!("    {} ", icon), style),
-            Span::styled(status.text.clone(), style),
-        ]));
-        line_to_tool.push(None);
-    }
-
-    if all_lines.is_empty() {
-        let empty_lines = ui_popups::draw_empty_state(app, inner.width);
-        for _ in &empty_lines {
-            line_to_tool.push(None);
-        }
-        all_lines.extend(empty_lines);
-    }
-
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(app.theme.border);
     let content_area = block.inner(area);
     let wrap_width = content_area.width;
 
-    let paragraph = Paragraph::new(all_lines.clone())
-        .block(block.clone())
-        .wrap(Wrap { trim: false });
-    let total_visual = paragraph.line_count(area.width) as u32;
+    let need_rebuild =
+        app.render_dirty || app.render_cache.as_ref().map(|c| c.width) != Some(area.width);
+
+    if need_rebuild {
+        let mut all_lines: Vec<Line<'static>> = Vec::new();
+        let mut line_to_msg: Vec<usize> = Vec::new();
+        let mut line_to_tool: Vec<Option<(usize, usize)>> = Vec::new();
+
+        for (msg_idx, msg) in app.messages.iter().enumerate() {
+            let before = all_lines.len();
+            render_message(
+                msg,
+                msg_idx,
+                &MessageRenderCtx {
+                    theme: &app.theme,
+                    thinking_expanded: app.thinking_expanded,
+                    inner_width: inner.width,
+                    expanded_tool_calls: &app.expanded_tool_calls,
+                },
+                &mut all_lines,
+                &mut line_to_tool,
+            );
+            let after = all_lines.len();
+            for _ in before..after {
+                line_to_msg.push(msg_idx);
+            }
+        }
+
+        if !app.todos.is_empty() {
+            let pad = if inner.width < 55 { "  " } else { "    " };
+            all_lines.push(Line::from(""));
+            line_to_msg.push(app.messages.len().saturating_sub(1));
+            line_to_tool.push(None);
+            let done = app
+                .todos
+                .iter()
+                .filter(|t| t.status == TodoStatus::Completed)
+                .count();
+            let total = app.todos.len();
+            all_lines.push(Line::from(vec![
+                Span::styled(format!("{}  ", pad), app.theme.dim),
+                Span::styled(format!("{}/{} ", done, total), app.theme.dim),
+                Span::styled("tasks", app.theme.dim),
+            ]));
+            line_to_msg.push(app.messages.len().saturating_sub(1));
+            line_to_tool.push(None);
+            for todo in &app.todos {
+                let (icon, style) = match todo.status {
+                    TodoStatus::Completed => ("\u{25c6}", app.theme.tool_success),
+                    TodoStatus::InProgress => ("\u{25c8}", Style::default().fg(app.theme.accent)),
+                    TodoStatus::Pending => ("\u{25c7}", app.theme.dim),
+                };
+                all_lines.push(Line::from(vec![
+                    Span::styled(format!("{}  {} ", pad, icon), style),
+                    Span::styled(todo.content.clone(), style),
+                ]));
+                line_to_msg.push(app.messages.len().saturating_sub(1));
+                line_to_tool.push(None);
+            }
+        }
+
+        if app.is_streaming {
+            let before_stream = all_lines.len();
+            ui_tools::render_streaming_state(app, inner.width, &mut all_lines);
+            let stream_msg_idx = app.messages.len().saturating_sub(1).max(0);
+            for _ in before_stream..all_lines.len() {
+                line_to_msg.push(stream_msg_idx);
+                line_to_tool.push(None);
+            }
+        }
+
+        if let Some(ref status) = app.status_message
+            && !status.expired()
+        {
+            let (icon, style) = match status.level {
+                StatusLevel::Error => ("\u{2718}", app.theme.error),
+                StatusLevel::Info => ("\u{25cb}", app.theme.dim),
+                StatusLevel::Success => ("\u{2714}", app.theme.tool_success),
+            };
+            all_lines.push(Line::from(""));
+            line_to_tool.push(None);
+            all_lines.push(Line::from(vec![
+                Span::styled(format!("    {} ", icon), style),
+                Span::styled(status.text.clone(), style),
+            ]));
+            line_to_tool.push(None);
+        }
+
+        if all_lines.is_empty() {
+            let empty_lines = ui_popups::draw_empty_state(app, inner.width);
+            for _ in &empty_lines {
+                line_to_tool.push(None);
+            }
+            all_lines.extend(empty_lines);
+        }
+
+        let total_visual = {
+            let p = Paragraph::new(all_lines.clone())
+                .block(block.clone())
+                .wrap(Wrap { trim: false });
+            p.line_count(area.width) as u32
+        };
+
+        app.content_width = area.width;
+        app.visual_lines = compute_visual_lines(&all_lines, wrap_width);
+        app.message_line_map = expand_line_to_msg(&all_lines, &line_to_msg, wrap_width);
+        app.tool_line_map = expand_line_to_tool(&all_lines, &line_to_tool, wrap_width);
+
+        app.render_cache = Some(crate::tui::app::RenderCache {
+            lines: all_lines,
+            line_to_msg,
+            line_to_tool,
+            total_visual,
+            width: area.width,
+        });
+        app.render_dirty = false;
+    }
+
+    let cache = app.render_cache.as_ref().unwrap();
+    let total_visual = cache.total_visual;
 
     let visible = content_area.height as u32;
     app.max_scroll = total_visual.saturating_sub(visible).min(u16::MAX as u32) as u16;
@@ -322,12 +346,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         app.scroll_offset = app.max_scroll;
     }
 
-    app.content_width = area.width;
-    app.visual_lines = compute_visual_lines(&all_lines, wrap_width);
-    app.message_line_map = expand_line_to_msg(&all_lines, &line_to_msg, wrap_width);
-    app.tool_line_map = expand_line_to_tool(&all_lines, &line_to_tool, wrap_width);
-
-    let paragraph = Paragraph::new(all_lines)
+    let paragraph = Paragraph::new(cache.lines.clone())
         .block(block)
         .wrap(Wrap { trim: false })
         .scroll((app.scroll_offset, 0));
@@ -916,50 +935,24 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
 
     let left_width: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
 
-    let context_indicator: Vec<Span<'static>> =
-        if app.context_window > 0 && app.last_input_tokens > 0 {
-            let pct = (app.last_input_tokens as f64 / app.context_window as f64 * 100.0).min(100.0);
-            let bar_width: usize = if compact { 6 } else { 10 };
-            let filled = ((pct / 100.0) * bar_width as f64).round() as usize;
-            let empty = bar_width.saturating_sub(filled);
-            let bar_color = if pct > 80.0 {
-                Color::Rgb(243, 139, 168)
-            } else if pct > 60.0 {
-                Color::Rgb(249, 226, 175)
-            } else {
-                Color::Rgb(88, 91, 112)
-            };
-            vec![
-                Span::styled("\u{2590}", Style::default().fg(app.theme.code_bg)),
-                Span::styled("\u{2588}".repeat(filled), Style::default().fg(bar_color)),
-                Span::styled(
-                    "\u{2591}".repeat(empty),
-                    Style::default().fg(app.theme.code_bg),
-                ),
-                Span::styled("\u{258c}", Style::default().fg(app.theme.code_bg)),
-                Span::styled(format!(" {:.0}% ", pct), app.theme.dim),
-            ]
-        } else {
-            vec![]
-        };
-
-    let hint = if app.model_selector.visible
+    let right_spans: Vec<Span<'static>> = if app.model_selector.visible
         || app.agent_selector.visible
         || app.thinking_selector.visible
         || app.session_selector.visible
         || app.help_popup.visible
     {
-        if compact {
+        let hint = if compact {
             "\u{2191}\u{2193} \u{23ce} esc "
         } else {
             "\u{2191}\u{2193} enter esc "
-        }
+        };
+        vec![Span::styled(hint.to_string(), app.theme.dim)]
     } else if app.is_streaming {
         let esc_active = app
             .esc_hint_until
             .map(|t| std::time::Instant::now() < t)
             .unwrap_or(false);
-        if esc_active {
+        let hint = if esc_active {
             if compact {
                 "esc to cancel "
             } else {
@@ -967,26 +960,33 @@ fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
             }
         } else {
             "esc \u{00b7} ^C "
-        }
+        };
+        vec![Span::styled(hint.to_string(), app.theme.dim)]
     } else if app.vim_mode && app.mode == AppMode::Normal {
-        "i j/k q "
-    } else if compact {
-        "? "
+        vec![Span::styled("i j/k q ".to_string(), app.theme.dim)]
+    } else if app.context_window > 0 && app.last_input_tokens > 0 {
+        let pct = (app.last_input_tokens as f64 / app.context_window as f64 * 100.0).min(100.0);
+        let color = if pct > 80.0 {
+            Color::Rgb(243, 139, 168)
+        } else if pct > 60.0 {
+            Color::Rgb(249, 226, 175)
+        } else {
+            app.theme.dim.fg.unwrap_or(Color::Gray)
+        };
+        vec![
+            Span::styled(format!("{:.0}%", pct), Style::default().fg(color)),
+            Span::raw(" "),
+        ]
     } else {
-        "? help "
+        vec![]
     };
 
-    let ctx_width: usize = context_indicator
-        .iter()
-        .map(|s| s.content.chars().count())
-        .sum();
-    let right_width = ctx_width + hint.len();
+    let right_width: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
     let padding = (area.width as usize).saturating_sub(left_width + right_width);
 
     let mut line_spans = left_spans;
     line_spans.push(Span::raw(" ".repeat(padding)));
-    line_spans.extend(context_indicator);
-    line_spans.push(Span::styled(hint.to_string(), app.theme.dim));
+    line_spans.extend(right_spans);
 
     frame.render_widget(Paragraph::new(Line::from(line_spans)), area);
 }

@@ -43,6 +43,7 @@ pub(super) async fn process_sse_stream(
 
     let mut block_types: HashMap<usize, String> = HashMap::new();
     let mut thinking_accums: HashMap<usize, ThinkingAccum> = HashMap::new();
+    let mut compaction_accums: HashMap<usize, String> = HashMap::new();
     let mut accumulated_input_tokens: u32 = 0;
 
     macro_rules! send {
@@ -115,6 +116,8 @@ pub(super) async fn process_sse_stream(
                                         signature: String::new(),
                                     },
                                 );
+                            } else if block_type == "compaction" {
+                                compaction_accums.insert(index, String::new());
                             }
 
                             block_types.insert(index, block_type);
@@ -154,6 +157,12 @@ pub(super) async fn process_sse_stream(
                                         accum.signature = sig;
                                     }
                                 }
+                                "compaction_delta" => {
+                                    let text = delta["content"].as_str().unwrap_or("").to_string();
+                                    if let Some(accum) = compaction_accums.get_mut(&index) {
+                                        accum.push_str(&text);
+                                    }
+                                }
                                 other => {
                                     debug!("Unknown delta type: {other}");
                                 }
@@ -172,6 +181,10 @@ pub(super) async fn process_sse_stream(
                                     thinking: accum.thinking,
                                     signature: accum.signature,
                                 });
+                            } else if btype == "compaction"
+                                && let Some(content) = compaction_accums.remove(&index)
+                            {
+                                send!(StreamEventType::CompactionComplete(content));
                             }
                             block_types.remove(&index);
                         }

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 pub struct SnapshotManager {
     originals: HashMap<PathBuf, Option<String>>,
+    checkpoints: Vec<HashMap<PathBuf, Option<String>>>,
 }
 
 impl Default for SnapshotManager {
@@ -15,6 +16,7 @@ impl SnapshotManager {
     pub fn new() -> Self {
         Self {
             originals: HashMap::new(),
+            checkpoints: Vec::new(),
         }
     }
 
@@ -91,6 +93,63 @@ impl SnapshotManager {
 
     pub fn clear(&mut self) {
         self.originals.clear();
+        self.checkpoints.clear();
+    }
+
+    pub fn checkpoint(&mut self) {
+        let mut snap = HashMap::new();
+        for path in self.originals.keys() {
+            let content = std::fs::read_to_string(path).ok();
+            snap.insert(path.clone(), content);
+        }
+        self.checkpoints.push(snap);
+    }
+
+    pub fn checkpoint_count(&self) -> usize {
+        self.checkpoints.len()
+    }
+
+    pub fn restore_to_checkpoint(&self, idx: usize) -> anyhow::Result<Vec<String>> {
+        let snap = self
+            .checkpoints
+            .get(idx)
+            .ok_or_else(|| anyhow::anyhow!("no checkpoint at index {}", idx))?;
+        let mut restored = Vec::new();
+        for (path, content) in snap {
+            match content {
+                None => {
+                    if path.exists() {
+                        std::fs::remove_file(path)?;
+                        restored.push(format!("deleted {}", path.display()));
+                    }
+                }
+                Some(c) => {
+                    std::fs::write(path, c)?;
+                    restored.push(format!("restored {}", path.display()));
+                }
+            }
+        }
+        for (path, original) in &self.originals {
+            if !snap.contains_key(path) {
+                match original {
+                    None => {
+                        if path.exists() {
+                            std::fs::remove_file(path)?;
+                            restored.push(format!("deleted {}", path.display()));
+                        }
+                    }
+                    Some(c) => {
+                        std::fs::write(path, c)?;
+                        restored.push(format!("restored {}", path.display()));
+                    }
+                }
+            }
+        }
+        Ok(restored)
+    }
+
+    pub fn truncate_checkpoints(&mut self, count: usize) {
+        self.checkpoints.truncate(count);
     }
 }
 

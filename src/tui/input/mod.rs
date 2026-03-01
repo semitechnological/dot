@@ -36,6 +36,8 @@ pub enum InputAction {
     CycleThinkingLevel,
     TruncateToMessage(usize),
     ForkFromMessage(usize),
+    RevertToMessage(usize),
+    CopyMessage(usize),
     LoadSkill { name: String },
     RunCustomCommand { name: String, args: String },
     OpenRenamePopup,

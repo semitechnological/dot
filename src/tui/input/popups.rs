@@ -346,8 +346,9 @@ pub(super) fn handle_context_menu(app: &mut App, key: KeyEvent) -> InputAction {
         KeyCode::Enter => {
             if let Some((action, msg_idx)) = app.context_menu.confirm() {
                 match action {
-                    0 => InputAction::TruncateToMessage(msg_idx),
+                    0 => InputAction::RevertToMessage(msg_idx),
                     1 => InputAction::ForkFromMessage(msg_idx),
+                    2 => InputAction::CopyMessage(msg_idx),
                     _ => InputAction::None,
                 }
             } else {

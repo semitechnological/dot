@@ -12,55 +12,54 @@ struct ToolCallsRenderCtx<'a> {
     show_verbose_output: bool,
     msg_idx: usize,
     width: u16,
+    tool_idx_base: usize,
 }
 
-pub fn render_tool_calls(
-    tool_calls: &[ToolCallDisplay],
-    theme: &Theme,
-    compact: bool,
-    lines: &mut Vec<Line<'static>>,
-    line_to_tool: Option<&mut Vec<Option<(usize, usize)>>>,
-    msg_idx: usize,
-    width: u16,
-    is_expanded: impl Fn(usize) -> bool,
-) {
+pub struct RenderToolCallsParams<'a> {
+    pub tool_calls: &'a [ToolCallDisplay],
+    pub theme: &'a Theme,
+    pub compact: bool,
+    pub lines: &'a mut Vec<Line<'static>>,
+    pub line_to_tool: Option<&'a mut Vec<Option<(usize, usize)>>>,
+    pub msg_idx: usize,
+    pub width: u16,
+    pub tool_idx_base: usize,
+}
+
+pub fn render_tool_calls(params: RenderToolCallsParams<'_>, is_expanded: impl Fn(usize) -> bool) {
     render_tool_calls_inner(
-        tool_calls,
+        params.tool_calls,
         &ToolCallsRenderCtx {
-            theme,
-            compact,
+            theme: params.theme,
+            compact: params.compact,
             show_verbose_output: true,
-            msg_idx,
-            width,
+            msg_idx: params.msg_idx,
+            width: params.width,
+            tool_idx_base: params.tool_idx_base,
         },
-        lines,
+        params.lines,
         is_expanded,
-        line_to_tool,
+        params.line_to_tool,
     );
 }
 
 pub fn render_tool_calls_compact(
-    tool_calls: &[ToolCallDisplay],
-    theme: &Theme,
-    compact: bool,
-    lines: &mut Vec<Line<'static>>,
-    line_to_tool: Option<&mut Vec<Option<(usize, usize)>>>,
-    msg_idx: usize,
-    width: u16,
+    params: RenderToolCallsParams<'_>,
     is_expanded: impl Fn(usize) -> bool,
 ) {
     render_tool_calls_inner(
-        tool_calls,
+        params.tool_calls,
         &ToolCallsRenderCtx {
-            theme,
-            compact,
+            theme: params.theme,
+            compact: params.compact,
             show_verbose_output: false,
-            msg_idx,
-            width,
+            msg_idx: params.msg_idx,
+            width: params.width,
+            tool_idx_base: params.tool_idx_base,
         },
-        lines,
+        params.lines,
         is_expanded,
-        line_to_tool,
+        params.line_to_tool,
     );
 }
 
@@ -88,7 +87,7 @@ fn render_tool_calls_inner(
             cat_style
         };
 
-        let has_content = tc.output.as_ref().map_or(false, |o| !o.is_empty())
+        let has_content = tc.output.as_ref().is_some_and(|o| !o.is_empty())
             || matches!(
                 tc.category,
                 ToolCategory::MultiEdit | ToolCategory::Patch | ToolCategory::FileWrite
@@ -155,6 +154,9 @@ fn render_tool_calls_inner(
                 ToolCategory::Question => {
                     header_spans.push(Span::styled(tc.detail.clone(), ctx.theme.dim));
                 }
+                ToolCategory::Subagent => {
+                    header_spans.push(Span::styled(tc.detail.clone(), ctx.theme.dim));
+                }
                 ToolCategory::Unknown => {
                     header_spans.push(Span::styled(tc.name.clone(), ctx.theme.tool_name));
                 }
@@ -165,7 +167,7 @@ fn render_tool_calls_inner(
 
         lines.push(Line::from(header_spans));
         if let Some(ltt) = &mut line_to_tool {
-            ltt.push(Some((ctx.msg_idx, tool_idx)));
+            ltt.push(Some((ctx.msg_idx, ctx.tool_idx_base + tool_idx)));
         }
 
         let should_show = if tc.is_error {
@@ -439,13 +441,16 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
                         lines.push(Line::from(""));
                     }
                     render_tool_calls_compact(
-                        std::slice::from_ref(tc),
-                        &app.theme,
-                        compact,
-                        lines,
-                        None,
-                        0,
-                        width,
+                        RenderToolCallsParams {
+                            tool_calls: std::slice::from_ref(tc),
+                            theme: &app.theme,
+                            compact,
+                            lines,
+                            line_to_tool: None,
+                            msg_idx: 0,
+                            width,
+                            tool_idx_base: 0,
+                        },
                         |_| false,
                     );
                     prev_was_tool = true;
@@ -522,7 +527,39 @@ pub fn render_streaming_state(app: &App, width: u16, lines: &mut Vec<Line<'stati
                 tool_spans.push(Span::styled(tool_name.to_string(), app.theme.tool_name));
             }
 
-            if has_segments {
+            if let Some(ref sub) = app.active_subagent {
+                if let Some(ref tool) = sub.current_tool {
+                    let tool_detail = sub.current_tool_detail.as_deref().unwrap_or("");
+                    let label = if tool_detail.is_empty() {
+                        tool.clone()
+                    } else {
+                        format!("{} {}", tool, tool_detail)
+                    };
+                    tool_spans.push(Span::styled(format!(" \u{00b7} {}", label), app.theme.dim));
+                }
+                let word_count = sub.output.split_whitespace().count();
+                let parts: Vec<String> = [
+                    if sub.tools_completed > 0 {
+                        Some(format!("{} tools", sub.tools_completed))
+                    } else {
+                        None
+                    },
+                    if word_count > 0 {
+                        Some(format!("{}w", word_count))
+                    } else {
+                        None
+                    },
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                if !parts.is_empty() {
+                    tool_spans.push(Span::styled(
+                        format!(" \u{00b7} {}", parts.join(", ")),
+                        app.theme.dim,
+                    ));
+                }
+            } else if has_segments {
                 let n = app.current_tool_calls.len();
                 tool_spans.push(Span::styled(format!(" \u{00b7} {} done", n), app.theme.dim));
             }
@@ -598,6 +635,7 @@ pub fn tool_category_style(category: &ToolCategory, theme: &Theme) -> Style {
         ToolCategory::Batch => theme.tool_command,
         ToolCategory::Snapshot => theme.tool_directory,
         ToolCategory::Question => theme.tool_skill,
+        ToolCategory::Subagent => theme.tool_skill,
         ToolCategory::Unknown => theme.tool_name,
     }
 }

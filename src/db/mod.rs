@@ -1,4 +1,4 @@
-mod schema;
+pub(crate) mod schema;
 
 use anyhow::{Context, Result};
 use chrono::Utc;

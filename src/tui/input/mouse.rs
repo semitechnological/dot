@@ -94,20 +94,83 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 app.selection.clear();
             }
 
+            if app.pending_question.is_some() {
+                if let Some(popup) = app.layout.question_popup
+                    && rect_contains(popup, col, row)
+                {
+                    let relative_row = row.saturating_sub(popup.y + 3) as usize;
+                    if let Some(ref mut pq) = app.pending_question {
+                        let total = pq.options.len() + 1;
+                        if relative_row < total {
+                            pq.selected = relative_row;
+                        }
+                    }
+                    let answer = if let Some(ref pq) = app.pending_question {
+                        if pq.options.is_empty() || pq.selected >= pq.options.len() {
+                            if pq.custom_input.is_empty() {
+                                "ok".to_string()
+                            } else {
+                                pq.custom_input.clone()
+                            }
+                        } else {
+                            pq.options[pq.selected].clone()
+                        }
+                    } else {
+                        return InputAction::None;
+                    };
+                    if let Some(ref mut pq) = app.pending_question
+                        && let Some(responder) = pq.responder.take()
+                    {
+                        let _ = responder.0.send(answer.clone());
+                    }
+                    app.pending_question = None;
+                    return InputAction::AnswerQuestion(answer);
+                }
+                return InputAction::None;
+            }
+
+            if app.pending_permission.is_some() {
+                if let Some(popup) = app.layout.permission_popup
+                    && rect_contains(popup, col, row)
+                {
+                    let relative_row = row.saturating_sub(popup.y + 4) as usize;
+                    if let Some(ref mut pp) = app.pending_permission
+                        && relative_row < 2
+                    {
+                        pp.selected = relative_row;
+                    }
+                    let answer = if let Some(ref pp) = app.pending_permission {
+                        if pp.selected == 0 { "allow" } else { "deny" }
+                    } else {
+                        return InputAction::None;
+                    };
+                    if let Some(ref mut pp) = app.pending_permission
+                        && let Some(responder) = pp.responder.take()
+                    {
+                        let _ = responder.0.send(answer.to_string());
+                    }
+                    app.pending_permission = None;
+                    return InputAction::AnswerPermission(answer.to_string());
+                }
+                return InputAction::None;
+            }
+
             if app.context_menu.visible {
                 if let Some(popup) = app.layout.context_menu
                     && rect_contains(popup, col, row)
                 {
                     let relative_row = row.saturating_sub(popup.y + 1) as usize;
-                    let max = crate::tui::widgets::MessageContextMenu::labels().len() - 1;
-                    app.context_menu.selected = relative_row.min(max);
-                    if let Some((action, msg_idx)) = app.context_menu.confirm() {
-                        return match action {
-                            0 => InputAction::RevertToMessage(msg_idx),
-                            1 => InputAction::ForkFromMessage(msg_idx),
-                            2 => InputAction::CopyMessage(msg_idx),
-                            _ => InputAction::None,
-                        };
+                    let max = crate::tui::widgets::MessageContextMenu::labels().len();
+                    if relative_row < max {
+                        app.context_menu.selected = relative_row;
+                        if let Some((action, msg_idx)) = app.context_menu.confirm() {
+                            return match action {
+                                0 => InputAction::RevertToMessage(msg_idx),
+                                1 => InputAction::ForkFromMessage(msg_idx),
+                                2 => InputAction::CopyMessage(msg_idx),
+                                _ => InputAction::None,
+                            };
+                        }
                     }
                 }
                 app.context_menu.close();
@@ -301,6 +364,111 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 } else {
                     app.selection.clear();
                 }
+            }
+            InputAction::None
+        }
+        MouseEventKind::Moved => {
+            if app.context_menu.visible
+                && let Some(popup) = app.layout.context_menu
+                && rect_contains(popup, col, row)
+            {
+                let relative_row = row.saturating_sub(popup.y + 1) as usize;
+                let max = crate::tui::widgets::MessageContextMenu::labels().len();
+                if relative_row < max {
+                    app.context_menu.selected = relative_row;
+                }
+                return InputAction::None;
+            }
+            if app.pending_question.is_some()
+                && let Some(popup) = app.layout.question_popup
+                && rect_contains(popup, col, row)
+            {
+                let relative_row = row.saturating_sub(popup.y + 3) as usize;
+                if let Some(ref mut pq) = app.pending_question {
+                    let total = pq.options.len() + 1;
+                    if relative_row < total {
+                        pq.selected = relative_row;
+                    }
+                }
+                return InputAction::None;
+            }
+            if app.pending_permission.is_some()
+                && let Some(popup) = app.layout.permission_popup
+                && rect_contains(popup, col, row)
+            {
+                let relative_row = row.saturating_sub(popup.y + 4) as usize;
+                if let Some(ref mut pp) = app.pending_permission
+                    && relative_row < 2
+                {
+                    pp.selected = relative_row;
+                }
+                return InputAction::None;
+            }
+            if app.command_palette.visible
+                && let Some(popup) = app.layout.command_palette
+                && rect_contains(popup, col, row)
+            {
+                let inner_y = popup.y + 1;
+                let inner_h = popup.height.saturating_sub(2) as usize;
+                let relative_row = row.saturating_sub(inner_y) as usize;
+                let scroll = if app.command_palette.selected >= inner_h {
+                    app.command_palette.selected - inner_h + 1
+                } else {
+                    0
+                };
+                let idx = scroll + relative_row;
+                if idx < app.command_palette.filtered.len() {
+                    app.command_palette.selected = idx;
+                }
+                return InputAction::None;
+            }
+            if app.file_picker.visible
+                && let Some(popup) = app.layout.file_picker
+                && rect_contains(popup, col, row)
+            {
+                let inner_y = popup.y + 1;
+                let inner_h = popup.height.saturating_sub(2) as usize;
+                let relative_row = row.saturating_sub(inner_y) as usize;
+                let scroll = if app.file_picker.selected >= inner_h {
+                    app.file_picker.selected - inner_h + 1
+                } else {
+                    0
+                };
+                let idx = scroll + relative_row;
+                if idx < app.file_picker.filtered.len() {
+                    app.file_picker.selected = idx;
+                }
+                return InputAction::None;
+            }
+            if app.agent_selector.visible
+                && let Some(popup) = app.layout.agent_selector
+                && rect_contains(popup, col, row)
+            {
+                let relative_row = row.saturating_sub(popup.y + 1) as usize;
+                if relative_row < app.agent_selector.entries.len() {
+                    app.agent_selector.selected = relative_row;
+                }
+                return InputAction::None;
+            }
+            if app.thinking_selector.visible
+                && let Some(popup) = app.layout.thinking_selector
+                && rect_contains(popup, col, row)
+            {
+                let relative_row = row.saturating_sub(popup.y + 1) as usize;
+                if relative_row < ThinkingLevel::all().len() {
+                    app.thinking_selector.selected = relative_row;
+                }
+                return InputAction::None;
+            }
+            if app.session_selector.visible
+                && let Some(popup) = app.layout.session_selector
+                && rect_contains(popup, col, row)
+            {
+                let relative_row = row.saturating_sub(popup.y + 3) as usize;
+                if relative_row < app.session_selector.filtered.len() {
+                    app.session_selector.selected = relative_row;
+                }
+                return InputAction::None;
             }
             InputAction::None
         }

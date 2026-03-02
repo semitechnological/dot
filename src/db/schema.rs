@@ -31,3 +31,42 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     created_at TEXT NOT NULL,
     FOREIGN KEY (message_id) REFERENCES messages(id)
 )";
+
+pub const CREATE_MEMORY_BLOCKS: &str = "
+CREATE TABLE IF NOT EXISTS memory_blocks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    content TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)";
+
+pub const CREATE_MEMORIES: &str = "
+CREATE TABLE IF NOT EXISTS memories (
+    id TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'fact',
+    importance REAL NOT NULL DEFAULT 0.5,
+    access_count INTEGER NOT NULL DEFAULT 0,
+    source_conversation_id TEXT,
+    superseded_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)";
+
+pub const CREATE_MEMORIES_FTS: &str = "
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    content, content='memories', content_rowid='rowid'
+)";
+
+pub const CREATE_MEMORIES_TRIGGERS: &str = "
+CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+    INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+END
+";

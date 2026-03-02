@@ -22,6 +22,7 @@ use crate::command::CommandRegistry;
 use crate::config::Config;
 use crate::db::Db;
 use crate::extension::HookRegistry;
+use crate::memory::MemoryStore;
 use crate::provider::Provider;
 use crate::tools::ToolRegistry;
 
@@ -38,6 +39,7 @@ pub async fn run(
     config: Config,
     providers: Vec<Box<dyn Provider>>,
     db: Db,
+    memory: Option<Arc<MemoryStore>>,
     tools: ToolRegistry,
     profiles: Vec<AgentProfile>,
     cwd: String,
@@ -62,6 +64,7 @@ pub async fn run(
         config,
         providers,
         db,
+        memory,
         tools,
         profiles,
         cwd,
@@ -103,6 +106,7 @@ async fn run_app(
     config: Config,
     providers: Vec<Box<dyn Provider>>,
     db: Db,
+    memory: Option<Arc<MemoryStore>>,
     tools: ToolRegistry,
     profiles: Vec<AgentProfile>,
     cwd: String,
@@ -121,17 +125,21 @@ async fn run_app(
     let history = db.get_user_message_history(500).unwrap_or_default();
 
     let agents_context = crate::context::AgentsContext::load(&cwd, &config.context);
-    let agent = Arc::new(Mutex::new(Agent::new(
+    let (bg_tx, mut bg_rx) = mpsc::unbounded_channel();
+    let mut agent_inner = Agent::new(
         providers,
         db,
         &config,
+        memory,
         tools,
         profiles,
         cwd,
         agents_context,
         hooks,
         commands,
-    )?));
+    )?;
+    agent_inner.set_background_tx(bg_tx);
+    let agent = Arc::new(Mutex::new(agent_inner));
 
     if let Some(ref id) = resume_id {
         let mut agent_lock = agent.lock().await;
@@ -252,6 +260,12 @@ async fn run_app(
                     }
                     continue;
                 }
+                bg_event = bg_rx.recv() => {
+                    if let Some(ev) = bg_event {
+                        app.handle_agent_event(ev);
+                    }
+                    continue;
+                }
                 ui_event = events.next() => {
                     match ui_event {
                         Some(ev) => ev,
@@ -260,9 +274,20 @@ async fn run_app(
                 }
             }
         } else {
-            match events.next().await {
-                Some(ev) => ev,
-                None => break,
+            tokio::select! {
+                biased;
+                bg_event = bg_rx.recv() => {
+                    if let Some(ev) = bg_event {
+                        app.handle_agent_event(ev);
+                    }
+                    continue;
+                }
+                ui_event = events.next() => {
+                    match ui_event {
+                        Some(ev) => ev,
+                        None => break,
+                    }
+                }
             }
         };
 

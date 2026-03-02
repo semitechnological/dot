@@ -1,5 +1,6 @@
 mod events;
 mod profile;
+mod subagent;
 
 pub use events::{AgentEvent, QuestionResponder, TodoItem, TodoStatus};
 pub use profile::AgentProfile;
@@ -10,14 +11,24 @@ use crate::command::CommandRegistry;
 use crate::config::Config;
 use crate::db::Db;
 use crate::extension::{Event, EventContext, HookRegistry, HookResult};
+use crate::memory::MemoryStore;
 use crate::provider::{ContentBlock, Message, Provider, Role, StreamEventType, Usage};
 use crate::tools::ToolRegistry;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 
 const COMPACT_THRESHOLD: f32 = 0.8;
 const COMPACT_KEEP_MESSAGES: usize = 10;
+
+const MEMORY_INSTRUCTIONS: &str = "\n\n\
+# Memory
+
+You have persistent memory across conversations. **Core blocks** (above) are always visible — update them via `core_memory_update` for essential user/agent facts. **Archival memory** is searched per turn — use `memory_add`/`memory_search`/`memory_list`/`memory_delete` to manage it.
+
+When the user says \"remember\"/\"forget\"/\"what do you know about me\", use the appropriate memory tool. Memories are also auto-extracted in the background, so focus on explicit requests.";
+
 
 const TITLE_SYSTEM_PROMPT: &str = "\
 You are a title generator. You output ONLY a thread title. Nothing else.
@@ -39,10 +50,13 @@ Rules:
   create a title reflecting the user's tone (Greeting, Quick check-in, etc.)";
 
 pub struct Agent {
-    providers: Vec<Box<dyn Provider>>,
+    providers: Vec<Arc<dyn Provider>>,
     active: usize,
-    tools: ToolRegistry,
+    tools: Arc<ToolRegistry>,
     db: Db,
+    memory: Option<Arc<MemoryStore>>,
+    memory_auto_extract: bool,
+    memory_inject_count: usize,
     conversation_id: String,
     messages: Vec<Message>,
     profiles: Vec<AgentProfile>,
@@ -55,6 +69,11 @@ pub struct Agent {
     snapshots: crate::snapshot::SnapshotManager,
     hooks: HookRegistry,
     commands: CommandRegistry,
+    subagent_enabled: bool,
+    subagent_max_turns: usize,
+    background_results: Arc<std::sync::Mutex<HashMap<String, String>>>,
+    background_handles: HashMap<String, tokio::task::JoinHandle<()>>,
+    background_tx: Option<UnboundedSender<AgentEvent>>,
 }
 
 impl Agent {
@@ -63,6 +82,7 @@ impl Agent {
         providers: Vec<Box<dyn Provider>>,
         db: Db,
         config: &Config,
+        memory: Option<Arc<MemoryStore>>,
         tools: ToolRegistry,
         profiles: Vec<AgentProfile>,
         cwd: String,
@@ -71,6 +91,7 @@ impl Agent {
         commands: CommandRegistry,
     ) -> Result<Self> {
         assert!(!providers.is_empty(), "at least one provider required");
+        let providers: Vec<Arc<dyn Provider>> = providers.into_iter().map(Arc::from).collect();
         let conversation_id =
             db.create_conversation(providers[0].model(), providers[0].name(), &cwd)?;
         tracing::debug!("Agent created with conversation {}", conversation_id);
@@ -86,8 +107,11 @@ impl Agent {
         Ok(Agent {
             providers,
             active: 0,
-            tools,
+            tools: Arc::new(tools),
             db,
+            memory,
+            memory_auto_extract: config.memory.auto_extract,
+            memory_inject_count: config.memory.inject_count,
             conversation_id,
             messages: Vec::new(),
             profiles,
@@ -100,13 +124,21 @@ impl Agent {
             snapshots: crate::snapshot::SnapshotManager::new(),
             hooks,
             commands,
+            subagent_enabled: config.subagents.enabled,
+            subagent_max_turns: config.subagents.max_turns,
+            background_results: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            background_handles: HashMap::new(),
+            background_tx: None,
         })
     }
     fn provider(&self) -> &dyn Provider {
         &*self.providers[self.active]
     }
-    fn provider_mut(&mut self) -> &mut dyn Provider {
-        &mut *self.providers[self.active]
+    fn provider_arc(&self) -> Arc<dyn Provider> {
+        Arc::clone(&self.providers[self.active])
+    }
+    pub fn set_background_tx(&mut self, tx: UnboundedSender<AgentEvent>) {
+        self.background_tx = Some(tx);
     }
     fn event_context(&self, event: &Event) -> EventContext {
         EventContext {
@@ -140,7 +172,11 @@ impl Agent {
         &self.messages
     }
     pub fn set_model(&mut self, model: String) {
-        self.provider_mut().set_model(model);
+        if let Some(p) = Arc::get_mut(&mut self.providers[self.active]) {
+            p.set_model(model);
+        } else {
+            tracing::warn!("cannot change model while background subagent is active");
+        }
     }
     pub fn set_active_provider(&mut self, provider_name: &str, model: &str) {
         if let Some(idx) = self
@@ -149,7 +185,11 @@ impl Agent {
             .position(|p| p.name() == provider_name)
         {
             self.active = idx;
-            self.providers[idx].set_model(model.to_string());
+            if let Some(p) = Arc::get_mut(&mut self.providers[idx]) {
+                p.set_model(model.to_string());
+            } else {
+                tracing::warn!("cannot change model while background subagent is active");
+            }
         }
     }
     pub fn set_thinking_budget(&mut self, budget: u32) {
@@ -535,9 +575,21 @@ impl Agent {
             None
         };
         let mut final_usage: Option<Usage> = None;
-        let system_prompt = self
+        let mut system_prompt = self
             .agents_context
             .apply_to_system_prompt(&self.profile().system_prompt);
+        if let Some(ref store) = self.memory {
+            let query: String = content.chars().take(200).collect();
+            match store.inject_context(&query, self.memory_inject_count) {
+                Ok(ctx) if !ctx.is_empty() => {
+                    system_prompt.push_str("\n\n");
+                    system_prompt.push_str(&ctx);
+                }
+                Err(e) => tracing::warn!("memory injection failed: {e}"),
+                _ => {}
+            }
+            system_prompt.push_str(MEMORY_INSTRUCTIONS);
+        }
         let tool_filter = self.profile().tool_filter.clone();
         let thinking_budget = self.thinking_budget;
         loop {
@@ -594,6 +646,64 @@ impl Agent {
                     },
                 }),
             });
+            if self.subagent_enabled {
+                let profile_names: Vec<String> =
+                    self.profiles.iter().map(|p| p.name.clone()).collect();
+                let profiles_desc = if profile_names.is_empty() {
+                    String::new()
+                } else {
+                    format!(" Available profiles: {}.", profile_names.join(", "))
+                };
+                tool_defs.push(crate::provider::ToolDefinition {
+                    name: "subagent".to_string(),
+                    description: format!(
+                        "Delegate a focused task to a subagent that runs in isolated context with its own conversation. \
+                         The subagent has access to tools and works autonomously without user interaction. \
+                         Use for complex subtasks that benefit from separate context (research, code analysis, multi-file changes). \
+                         Set background=true to run non-blocking (returns immediately with an ID; retrieve results later with subagent_result).{}",
+                        profiles_desc
+                    ),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "description": {
+                                "type": "string",
+                                "description": "What the subagent should do (used as system prompt context)"
+                            },
+                            "task": {
+                                "type": "string",
+                                "description": "The specific task prompt for the subagent"
+                            },
+                            "profile": {
+                                "type": "string",
+                                "description": "Agent profile to use (affects available tools and system prompt)"
+                            },
+                            "background": {
+                                "type": "boolean",
+                                "description": "Run in background (non-blocking). Returns an ID to check later with subagent_result."
+                            }
+                        },
+                        "required": ["description", "task"]
+                    }),
+                });
+                tool_defs.push(crate::provider::ToolDefinition {
+                    name: "subagent_result".to_string(),
+                    description: "Retrieve the result of a background subagent by ID. Returns the output if complete, or a status message if still running.".to_string(),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "description": "The subagent ID returned when it was launched in background mode"
+                            }
+                        },
+                        "required": ["id"]
+                    }),
+                });
+            }
+            if self.memory.is_some() {
+                tool_defs.extend(crate::memory::tools::definitions());
+            }
             {
                 let mut ctx = self.event_context(&Event::BeforePrompt);
                 ctx.prompt = Some(content.to_string());
@@ -709,7 +819,8 @@ impl Agent {
 
             for tc in &tool_calls {
                 let input_value: serde_json::Value =
-                    serde_json::from_str(&tc.input).unwrap_or(serde_json::Value::Null);
+                    serde_json::from_str(&tc.input)
+                        .unwrap_or_else(|_| serde_json::json!({}));
                 content_blocks.push(ContentBlock::ToolUse {
                     id: tc.id.clone(),
                     name: tc.name.clone(),
@@ -745,6 +856,28 @@ impl Agent {
                 if let Some(usage) = final_usage {
                     let _ = event_tx.send(AgentEvent::Done { usage });
                 }
+                if self.memory_auto_extract
+                    && let Some(ref store) = self.memory
+                {
+                    let msgs = self.messages.clone();
+                    let provider = self.provider_arc();
+                    let store = Arc::clone(store);
+                    let conv_id = self.conversation_id.clone();
+                    let etx = event_tx.clone();
+                    tokio::spawn(async move {
+                        match crate::memory::extract::extract(&msgs, &*provider, &store, &conv_id).await {
+                            Ok(result) if result.added > 0 || result.updated > 0 || result.deleted > 0 => {
+                                let _ = etx.send(AgentEvent::MemoryExtracted {
+                                    added: result.added,
+                                    updated: result.updated,
+                                    deleted: result.deleted,
+                                });
+                            }
+                            Err(e) => tracing::warn!("memory extraction failed: {e}"),
+                            _ => {}
+                        }
+                    });
+                }
                 break;
             }
 
@@ -752,7 +885,8 @@ impl Agent {
 
             for tc in &tool_calls {
                 let input_value: serde_json::Value =
-                    serde_json::from_str(&tc.input).unwrap_or(serde_json::Value::Null);
+                    serde_json::from_str(&tc.input)
+                        .unwrap_or_else(|_| serde_json::json!({}));
                 // Virtual tool: todo_write
                 if tc.name == "todo_write" {
                     if let Some(todos_arr) = input_value.get("todos").and_then(|v| v.as_array()) {
@@ -915,6 +1049,112 @@ impl Agent {
                         tool_use_id: tc.id.clone(),
                         content: output,
                         is_error: false,
+                    });
+                    continue;
+                }
+                // Virtual tool: subagent
+                if tc.name == "subagent" {
+                    let description = input_value
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("subtask")
+                        .to_string();
+                    let task = input_value
+                        .get("task")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let profile = input_value
+                        .get("profile")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    let background = input_value
+                        .get("background")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+
+                    let output = if background {
+                        match self.spawn_background_subagent(
+                            &description,
+                            &task,
+                            profile.as_deref(),
+                        ) {
+                            Ok(id) => format!("Background subagent launched with id: {id}"),
+                            Err(e) => {
+                                tracing::error!("background subagent error: {e}");
+                                format!("[subagent error: {e}]")
+                            }
+                        }
+                    } else {
+                        match self
+                            .run_subagent(&description, &task, profile.as_deref(), &event_tx)
+                            .await
+                        {
+                            Ok(text) => text,
+                            Err(e) => {
+                                tracing::error!("subagent error: {e}");
+                                format!("[subagent error: {e}]")
+                            }
+                        }
+                    };
+                    let is_error = output.starts_with("[subagent error:");
+                    let _ = event_tx.send(AgentEvent::ToolCallResult {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        output: output.clone(),
+                        is_error,
+                    });
+                    result_blocks.push(ContentBlock::ToolResult {
+                        tool_use_id: tc.id.clone(),
+                        content: output,
+                        is_error,
+                    });
+                    continue;
+                }
+                // Virtual tool: subagent_result
+                if tc.name == "subagent_result" {
+                    let id = input_value.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    let output = {
+                        let results = self
+                            .background_results
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                        if let Some(result) = results.get(id) {
+                            result.clone()
+                        } else if self.background_handles.contains_key(id) {
+                            format!("Subagent '{id}' is still running.")
+                        } else {
+                            format!("No subagent found with id '{id}'.")
+                        }
+                    };
+                    let _ = event_tx.send(AgentEvent::ToolCallResult {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        output: output.clone(),
+                        is_error: false,
+                    });
+                    result_blocks.push(ContentBlock::ToolResult {
+                        tool_use_id: tc.id.clone(),
+                        content: output,
+                        is_error: false,
+                    });
+                    continue;
+                }
+                // Virtual tools: memory
+                if let Some(ref store) = self.memory
+                    && let Some((output, is_error)) =
+                        crate::memory::tools::handle(&tc.name, &input_value, store, &self.conversation_id)
+                {
+                    let _ = event_tx.send(AgentEvent::ToolCallResult {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        output: output.clone(),
+                        is_error,
+                    });
+                    result_blocks.push(ContentBlock::ToolResult {
+                        tool_use_id: tc.id.clone(),
+                        content: output,
+                        is_error,
                     });
                     continue;
                 }

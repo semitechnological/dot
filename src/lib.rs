@@ -7,6 +7,7 @@ pub mod context;
 pub mod db;
 pub mod extension;
 pub mod mcp;
+pub mod memory;
 pub mod packages;
 pub mod provider;
 pub mod skills;

@@ -26,6 +26,10 @@ pub struct Config {
     pub commands: HashMap<String, CommandConfig>,
     #[serde(default)]
     pub hooks: HashMap<String, HookConfig>,
+    #[serde(default)]
+    pub subagents: SubagentSettings,
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +132,58 @@ pub struct HookConfig {
     pub timeout: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubagentSettings {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_max_subagent_turns")]
+    pub max_turns: usize,
+}
+
+impl Default for SubagentSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_turns: 20,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub auto_extract: bool,
+    #[serde(default = "default_inject_count")]
+    pub inject_count: usize,
+    #[serde(default = "default_max_memories")]
+    pub max_memories: usize,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_extract: true,
+            inject_count: 15,
+            max_memories: 2000,
+        }
+    }
+}
+
+fn default_inject_count() -> usize {
+    15
+}
+
+fn default_max_memories() -> usize {
+    2000
+}
+
+fn default_max_subagent_turns() -> usize {
+    20
+}
+
 fn default_true() -> bool {
     true
 }
@@ -161,6 +217,8 @@ impl Default for Config {
             custom_tools: HashMap::new(),
             commands: HashMap::new(),
             hooks: HashMap::new(),
+            subagents: SubagentSettings::default(),
+            memory: MemoryConfig::default(),
         }
     }
 }

@@ -130,10 +130,10 @@ pub fn render_markdown(text: &str, theme: &Theme, width: u16) -> Vec<Line<'stati
             } else {
                 in_code_block = true;
                 code_lang = raw_line.trim_start_matches('`').trim().to_string();
-                if let Some(last) = lines.last() {
-                    if last.spans.iter().all(|s| s.content.trim().is_empty()) {
-                        lines.pop();
-                    }
+                if let Some(last) = lines.last()
+                    && last.spans.iter().all(|s| s.content.trim().is_empty())
+                {
+                    lines.pop();
                 }
             }
             continue;

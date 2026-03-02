@@ -76,13 +76,12 @@ pub(super) fn convert_messages(messages: &[Message]) -> Vec<serde_json::Value> {
         let blocks: Vec<serde_json::Value> = m.content.iter().map(convert_content_block).collect();
         // Merge consecutive same-role messages to maintain valid alternation.
         // This guards against edge cases from cancelled streams or compaction.
-        if let Some(prev) = result.last_mut() {
-            if prev["role"].as_str() == Some(role) {
-                if let Some(arr) = prev["content"].as_array_mut() {
-                    arr.extend(blocks);
-                    continue;
-                }
-            }
+        if let Some(prev) = result.last_mut()
+            && prev["role"].as_str() == Some(role)
+            && let Some(arr) = prev["content"].as_array_mut()
+        {
+            arr.extend(blocks);
+            continue;
         }
         result.push(serde_json::json!({ "role": role, "content": blocks }));
     }

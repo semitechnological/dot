@@ -15,6 +15,7 @@ pub enum ToolCategory {
     Question,
     Mcp { server: String },
     Skill,
+    Subagent,
     Unknown,
 }
 
@@ -35,6 +36,7 @@ impl ToolCategory {
             "snapshot_list" | "snapshot_restore" => Self::Snapshot,
             "question" => Self::Question,
             "skill" => Self::Skill,
+            "subagent" | "subagent_result" => Self::Subagent,
             other => {
                 if let Some(idx) = other.find('_') {
                     let prefix = &other[..idx];
@@ -70,6 +72,7 @@ impl ToolCategory {
             Self::Question => "\u{f128} ",
             Self::Mcp { .. } => "\u{f1e6} ",
             Self::Skill => "\u{f0eb} ",
+            Self::Subagent => "\u{f0c0} ",
             Self::Unknown => "\u{f013} ",
         }
     }
@@ -91,6 +94,7 @@ impl ToolCategory {
             Self::Question => "question".to_string(),
             Self::Mcp { server } => format!("mcp:{}", server),
             Self::Skill => "skill".to_string(),
+            Self::Subagent => "agent".to_string(),
             Self::Unknown => "tool".to_string(),
         }
     }
@@ -112,6 +116,7 @@ impl ToolCategory {
             Self::Question => "asking",
             Self::Mcp { .. } => "calling",
             Self::Skill => "loading",
+            Self::Subagent => "delegating",
             Self::Unknown => "running",
         }
     }
@@ -249,6 +254,29 @@ pub fn extract_tool_detail(name: &str, input: &str) -> String {
             .unwrap_or_default(),
         "skill" => val
             .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "subagent" => {
+            let desc = val
+                .get("description")
+                .and_then(|v| v.as_str())
+                .map(|d| {
+                    if d.len() > 40 {
+                        format!("{}...", &d[..37])
+                    } else {
+                        d.to_string()
+                    }
+                })
+                .unwrap_or_default();
+            let bg = val
+                .get("background")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if bg { format!("{} (bg)", desc) } else { desc }
+        }
+        "subagent_result" => val
+            .get("id")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),

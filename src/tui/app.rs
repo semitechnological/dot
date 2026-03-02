@@ -190,6 +190,24 @@ pub struct PendingQuestion {
     pub responder: Option<QuestionResponder>,
 }
 
+pub struct SubagentState {
+    pub id: String,
+    pub description: String,
+    pub output: String,
+    pub current_tool: Option<String>,
+    pub current_tool_detail: Option<String>,
+    pub tools_completed: usize,
+    pub background: bool,
+}
+
+pub struct BackgroundSubagentInfo {
+    pub id: String,
+    pub description: String,
+    pub output: String,
+    pub tools_completed: usize,
+    pub done: bool,
+}
+
 #[derive(Debug)]
 pub struct PendingPermission {
     pub tool_name: String,
@@ -303,6 +321,8 @@ pub struct App {
     pub favorite_models: Vec<String>,
     pub file_picker: FilePicker,
     pub chips: Vec<InputChip>,
+    pub active_subagent: Option<SubagentState>,
+    pub background_subagents: Vec<BackgroundSubagentInfo>,
 
     pub render_dirty: bool,
     pub render_cache: Option<RenderCache>,
@@ -377,6 +397,8 @@ impl App {
             favorite_models: Vec::new(),
             file_picker: FilePicker::new(),
             chips: Vec::new(),
+            active_subagent: None,
+            background_subagents: Vec::new(),
             render_dirty: true,
             render_cache: None,
         }
@@ -554,6 +576,99 @@ impl App {
                     selected: 0,
                     responder: Some(responder),
                 });
+            }
+            AgentEvent::SubagentStart {
+                id,
+                description,
+                background,
+            } => {
+                if background {
+                    self.background_subagents.push(BackgroundSubagentInfo {
+                        id,
+                        description,
+                        output: String::new(),
+                        tools_completed: 0,
+                        done: false,
+                    });
+                } else {
+                    self.active_subagent = Some(SubagentState {
+                        id,
+                        description,
+                        output: String::new(),
+                        current_tool: None,
+                        current_tool_detail: None,
+                        tools_completed: 0,
+                        background: false,
+                    });
+                }
+            }
+            AgentEvent::SubagentDelta { id, text } => {
+                if let Some(ref mut state) = self.active_subagent
+                    && state.id == id
+                {
+                    state.output.push_str(&text);
+                } else if let Some(bg) = self.background_subagents.iter_mut().find(|b| b.id == id) {
+                    bg.output.push_str(&text);
+                }
+            }
+            AgentEvent::SubagentToolStart {
+                id,
+                tool_name,
+                detail,
+            } => {
+                if let Some(ref mut state) = self.active_subagent
+                    && state.id == id
+                {
+                    state.current_tool = Some(tool_name);
+                    state.current_tool_detail = Some(detail);
+                }
+            }
+            AgentEvent::SubagentToolComplete { id, .. } => {
+                if let Some(ref mut state) = self.active_subagent
+                    && state.id == id
+                {
+                    state.current_tool = None;
+                    state.current_tool_detail = None;
+                    state.tools_completed += 1;
+                } else if let Some(bg) = self.background_subagents.iter_mut().find(|b| b.id == id) {
+                    bg.tools_completed += 1;
+                }
+            }
+            AgentEvent::SubagentComplete { id, .. } => {
+                if self.active_subagent.as_ref().is_some_and(|s| s.id == id) {
+                    self.active_subagent = None;
+                }
+            }
+            AgentEvent::SubagentBackgroundDone {
+                id, description, ..
+            } => {
+                if let Some(bg) = self.background_subagents.iter_mut().find(|b| b.id == id) {
+                    bg.done = true;
+                }
+                self.status_message = Some(StatusMessage::success(format!(
+                    "Background subagent done: {}",
+                    description
+                )));
+            }
+            AgentEvent::MemoryExtracted {
+                added,
+                updated,
+                deleted,
+            } => {
+                let parts: Vec<String> = [
+                    (added > 0).then(|| format!("+{added}")),
+                    (updated > 0).then(|| format!("~{updated}")),
+                    (deleted > 0).then(|| format!("-{deleted}")),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                if !parts.is_empty() {
+                    self.status_message = Some(StatusMessage::success(format!(
+                        "memory {}",
+                        parts.join(" ")
+                    )));
+                }
             }
         }
         self.mark_dirty();
@@ -867,6 +982,8 @@ impl App {
         self.context_menu.close();
         self.pending_question = None;
         self.pending_permission = None;
+        self.active_subagent = None;
+        self.background_subagents.clear();
         self.message_queue.clear();
         self.render_cache = None;
         self.mark_dirty();

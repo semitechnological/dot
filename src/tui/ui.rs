@@ -340,9 +340,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let visible = content_area.height as u32;
     app.max_scroll = total_visual.saturating_sub(visible).min(u16::MAX as u32) as u16;
-    if app.follow_bottom {
-        app.scroll_offset = app.max_scroll;
-    } else if app.scroll_offset > app.max_scroll {
+    if app.follow_bottom || app.scroll_offset > app.max_scroll {
         app.scroll_offset = app.max_scroll;
     }
 
@@ -537,13 +535,16 @@ fn render_message(
                                 line_to_tool.push(None);
                             }
                             ui_tools::render_tool_calls_compact(
-                                std::slice::from_ref(tc),
-                                ctx.theme,
-                                compact,
-                                lines,
-                                Some(line_to_tool),
-                                msg_idx,
-                                ctx.inner_width,
+                                ui_tools::RenderToolCallsParams {
+                                    tool_calls: std::slice::from_ref(tc),
+                                    theme: ctx.theme,
+                                    compact,
+                                    lines,
+                                    line_to_tool: Some(line_to_tool),
+                                    msg_idx,
+                                    width: ctx.inner_width,
+                                    tool_idx_base: tool_idx,
+                                },
                                 |_| ctx.expanded_tool_calls.contains(&(msg_idx, tool_idx)),
                             );
                             tool_idx += 1;
@@ -554,13 +555,16 @@ fn render_message(
             } else {
                 if !msg.tool_calls.is_empty() && msg.content.is_empty() {
                     ui_tools::render_tool_calls(
-                        &msg.tool_calls,
-                        ctx.theme,
-                        compact,
-                        lines,
-                        Some(line_to_tool),
-                        msg_idx,
-                        ctx.inner_width,
+                        ui_tools::RenderToolCallsParams {
+                            tool_calls: &msg.tool_calls,
+                            theme: ctx.theme,
+                            compact,
+                            lines,
+                            line_to_tool: Some(line_to_tool),
+                            msg_idx,
+                            width: ctx.inner_width,
+                            tool_idx_base: 0,
+                        },
                         |i| ctx.expanded_tool_calls.contains(&(msg_idx, i)),
                     );
                 }
@@ -588,13 +592,16 @@ fn render_message(
                 }
                 if !msg.tool_calls.is_empty() && !msg.content.is_empty() {
                     ui_tools::render_tool_calls_compact(
-                        &msg.tool_calls,
-                        ctx.theme,
-                        compact,
-                        lines,
-                        Some(line_to_tool),
-                        msg_idx,
-                        ctx.inner_width,
+                        ui_tools::RenderToolCallsParams {
+                            tool_calls: &msg.tool_calls,
+                            theme: ctx.theme,
+                            compact,
+                            lines,
+                            line_to_tool: Some(line_to_tool),
+                            msg_idx,
+                            width: ctx.inner_width,
+                            tool_idx_base: 0,
+                        },
                         |i| ctx.expanded_tool_calls.contains(&(msg_idx, i)),
                     );
                 }

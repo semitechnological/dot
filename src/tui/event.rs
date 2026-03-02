@@ -51,6 +51,7 @@ impl EventHandler {
                                     MouseEventKind::Down(_)
                                         | MouseEventKind::Up(_)
                                         | MouseEventKind::Drag(_)
+                                        | MouseEventKind::Moved
                                         | MouseEventKind::ScrollUp
                                         | MouseEventKind::ScrollDown
                                 );

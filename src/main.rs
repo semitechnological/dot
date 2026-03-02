@@ -121,6 +121,13 @@ async fn main() -> Result<()> {
             dot::packages::merge_into_config(&mut config);
             let creds = dot::auth::Credentials::load()?;
             let db = dot::db::Db::open().context("opening database")?;
+            let memory = if config.memory.enabled {
+                Some(std::sync::Arc::new(
+                    dot::memory::MemoryStore::open().context("opening memory store")?,
+                ))
+            } else {
+                None
+            };
             let providers = build_providers(&config, &creds)?;
             let (tools, skill_names) = build_tool_registry(&config);
             let profiles = build_agent_profiles(&config);
@@ -135,6 +142,7 @@ async fn main() -> Result<()> {
                 config,
                 providers,
                 db,
+                memory,
                 tools,
                 profiles,
                 cwd,

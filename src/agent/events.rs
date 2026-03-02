@@ -62,6 +62,38 @@ pub enum AgentEvent {
         input_summary: String,
         responder: QuestionResponder,
     },
+    SubagentStart {
+        id: String,
+        description: String,
+        background: bool,
+    },
+    SubagentDelta {
+        id: String,
+        text: String,
+    },
+    SubagentToolStart {
+        id: String,
+        tool_name: String,
+        detail: String,
+    },
+    SubagentToolComplete {
+        id: String,
+        tool_name: String,
+    },
+    SubagentComplete {
+        id: String,
+        output: String,
+    },
+    SubagentBackgroundDone {
+        id: String,
+        description: String,
+        output: String,
+    },
+    MemoryExtracted {
+        added: usize,
+        updated: usize,
+        deleted: usize,
+    },
 }
 
 pub(super) struct PendingToolCall {

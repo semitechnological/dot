@@ -29,7 +29,6 @@ You have persistent memory across conversations. **Core blocks** (above) are alw
 
 When the user says \"remember\"/\"forget\"/\"what do you know about me\", use the appropriate memory tool. Memories are also auto-extracted in the background, so focus on explicit requests.";
 
-
 const TITLE_SYSTEM_PROMPT: &str = "\
 You are a title generator. You output ONLY a thread title. Nothing else.
 
@@ -819,8 +818,7 @@ impl Agent {
 
             for tc in &tool_calls {
                 let input_value: serde_json::Value =
-                    serde_json::from_str(&tc.input)
-                        .unwrap_or_else(|_| serde_json::json!({}));
+                    serde_json::from_str(&tc.input).unwrap_or_else(|_| serde_json::json!({}));
                 content_blocks.push(ContentBlock::ToolUse {
                     id: tc.id.clone(),
                     name: tc.name.clone(),
@@ -865,8 +863,12 @@ impl Agent {
                     let conv_id = self.conversation_id.clone();
                     let etx = event_tx.clone();
                     tokio::spawn(async move {
-                        match crate::memory::extract::extract(&msgs, &*provider, &store, &conv_id).await {
-                            Ok(result) if result.added > 0 || result.updated > 0 || result.deleted > 0 => {
+                        match crate::memory::extract::extract(&msgs, &*provider, &store, &conv_id)
+                            .await
+                        {
+                            Ok(result)
+                                if result.added > 0 || result.updated > 0 || result.deleted > 0 =>
+                            {
                                 let _ = etx.send(AgentEvent::MemoryExtracted {
                                     added: result.added,
                                     updated: result.updated,
@@ -885,8 +887,7 @@ impl Agent {
 
             for tc in &tool_calls {
                 let input_value: serde_json::Value =
-                    serde_json::from_str(&tc.input)
-                        .unwrap_or_else(|_| serde_json::json!({}));
+                    serde_json::from_str(&tc.input).unwrap_or_else(|_| serde_json::json!({}));
                 // Virtual tool: todo_write
                 if tc.name == "todo_write" {
                     if let Some(todos_arr) = input_value.get("todos").and_then(|v| v.as_array()) {
@@ -1142,8 +1143,12 @@ impl Agent {
                 }
                 // Virtual tools: memory
                 if let Some(ref store) = self.memory
-                    && let Some((output, is_error)) =
-                        crate::memory::tools::handle(&tc.name, &input_value, store, &self.conversation_id)
+                    && let Some((output, is_error)) = crate::memory::tools::handle(
+                        &tc.name,
+                        &input_value,
+                        store,
+                        &self.conversation_id,
+                    )
                 {
                     let _ = event_tx.send(AgentEvent::ToolCallResult {
                         id: tc.id.clone(),

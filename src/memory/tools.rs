@@ -125,10 +125,7 @@ pub fn handle(
         }
         "memory_search" => {
             let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
-            let limit = input
-                .get("limit")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(10) as usize;
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
             match store.search(query, limit) {
                 Ok(results) => {
                     if results.is_empty() {
@@ -156,10 +153,7 @@ pub fn handle(
         }
         "memory_add" => {
             let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            let kind = input
-                .get("kind")
-                .and_then(|v| v.as_str())
-                .unwrap_or("fact");
+            let kind = input.get("kind").and_then(|v| v.as_str()).unwrap_or("fact");
             let importance = input
                 .get("importance")
                 .and_then(|v| v.as_f64())
@@ -182,10 +176,7 @@ pub fn handle(
                 .get("kind")
                 .and_then(|v| v.as_str())
                 .map(MemoryKind::parse);
-            let limit = input
-                .get("limit")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(20) as usize;
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
             match store.list(kind.as_ref(), limit) {
                 Ok(memories) => {
                     if memories.is_empty() {

@@ -263,9 +263,7 @@ impl MemoryStore {
                     memory: Memory {
                         id: row.get(0)?,
                         content: row.get(1)?,
-                        kind: MemoryKind::parse(
-                            row.get::<_, String>(2)?.as_str(),
-                        ),
+                        kind: MemoryKind::parse(row.get::<_, String>(2)?.as_str()),
                         importance: row.get(3)?,
                         access_count: row.get::<_, i64>(4)? as u32,
                         source_conversation_id: row.get(5)?,

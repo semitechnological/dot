@@ -61,7 +61,12 @@ pub async fn extract(
     } else {
         snapshot
             .iter()
-            .map(|m| format!("- [{}] id={} importance={:.2}: {}", m.kind, m.id, m.importance, m.content))
+            .map(|m| {
+                format!(
+                    "- [{}] id={} importance={:.2}: {}",
+                    m.kind, m.id, m.importance, m.content
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };

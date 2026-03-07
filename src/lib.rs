@@ -6,6 +6,7 @@ pub mod config;
 pub mod context;
 pub mod db;
 pub mod extension;
+pub mod headless;
 pub mod mcp;
 pub mod memory;
 pub mod packages;

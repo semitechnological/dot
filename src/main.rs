@@ -115,46 +115,136 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             }
         },
-        None => {
+        Some(dot::cli::Commands::Run {
+            prompt,
+            output,
+            no_tools,
+            session,
+            interactive,
+        }) => {
             dot::config::Config::ensure_dirs()?;
-            let mut config = dot::config::Config::load()?;
-            dot::packages::merge_into_config(&mut config);
-            let creds = dot::auth::Credentials::load()?;
-            let db = dot::db::Db::open().context("opening database")?;
-            let memory = if config.memory.enabled {
-                Some(std::sync::Arc::new(
-                    dot::memory::MemoryStore::open().context("opening memory store")?,
-                ))
-            } else {
-                None
+            let prompt = match prompt {
+                Some(p) => p,
+                None if !interactive => {
+                    use std::io::Read;
+                    let mut buf = String::new();
+                    std::io::stdin()
+                        .read_to_string(&mut buf)
+                        .context("reading prompt from stdin")?;
+                    let trimmed = buf.trim().to_string();
+                    if trimmed.is_empty() {
+                        bail!("No prompt provided. Pass a prompt argument or pipe via stdin.");
+                    }
+                    trimmed
+                }
+                None => String::new(),
             };
-            let providers = build_providers(&config, &creds)?;
-            let (tools, skill_names) = build_tool_registry(&config);
-            let profiles = build_agent_profiles(&config);
-            let hooks = build_hooks(&config);
-            let commands = build_commands(&config);
-            let cwd = std::env::current_dir()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let resume_id = cli.session.clone();
-            dot::tui::run(
-                config,
-                providers,
-                db,
-                memory,
-                tools,
-                profiles,
-                cwd,
-                resume_id,
-                skill_names,
-                hooks,
-                commands,
-            )
-            .await?;
+            run_headless(prompt, output, no_tools, session, interactive).await?;
+        }
+        None => {
+            let headless_prompt = cli.prompt.clone();
+            if headless_prompt.is_some() || cli.interactive {
+                let prompt = headless_prompt.unwrap_or_default();
+                run_headless(
+                    prompt,
+                    cli.output.clone(),
+                    cli.no_tools,
+                    cli.session.clone(),
+                    cli.interactive,
+                )
+                .await?;
+            } else {
+                dot::config::Config::ensure_dirs()?;
+                let mut config = dot::config::Config::load()?;
+                dot::packages::merge_into_config(&mut config);
+                let creds = dot::auth::Credentials::load()?;
+                let db = dot::db::Db::open().context("opening database")?;
+                let memory = if config.memory.enabled {
+                    Some(std::sync::Arc::new(
+                        dot::memory::MemoryStore::open().context("opening memory store")?,
+                    ))
+                } else {
+                    None
+                };
+                let providers = build_providers(&config, &creds)?;
+                let (tools, skill_names) = build_tool_registry(&config);
+                let profiles = build_agent_profiles(&config);
+                let hooks = build_hooks(&config);
+                let commands = build_commands(&config);
+                let cwd = std::env::current_dir()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let resume_id = cli.session.clone();
+                dot::tui::run(
+                    config,
+                    providers,
+                    db,
+                    memory,
+                    tools,
+                    profiles,
+                    cwd,
+                    resume_id,
+                    skill_names,
+                    hooks,
+                    commands,
+                )
+                .await?;
+            }
         }
     }
     Ok(())
+}
+
+async fn run_headless(
+    prompt: String,
+    output: String,
+    no_tools: bool,
+    session: Option<String>,
+    interactive: bool,
+) -> Result<()> {
+    dot::config::Config::ensure_dirs()?;
+    let mut config = dot::config::Config::load()?;
+    dot::packages::merge_into_config(&mut config);
+    let creds = dot::auth::Credentials::load()?;
+    let db = dot::db::Db::open().context("opening database")?;
+    let memory = if config.memory.enabled {
+        Some(std::sync::Arc::new(
+            dot::memory::MemoryStore::open().context("opening memory store")?,
+        ))
+    } else {
+        None
+    };
+    let providers = build_providers(&config, &creds)?;
+    let (tools, skill_names) = build_tool_registry(&config);
+    let profiles = build_agent_profiles(&config);
+    let hooks = build_hooks(&config);
+    let commands = build_commands(&config);
+    let cwd = std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let opts = dot::headless::HeadlessOptions {
+        prompt,
+        format: dot::headless::OutputFormat::parse(&output),
+        no_tools,
+        resume_id: session,
+        interactive,
+    };
+    dot::headless::run(
+        config,
+        providers,
+        db,
+        memory,
+        tools,
+        profiles,
+        cwd,
+        skill_names,
+        hooks,
+        commands,
+        opts,
+    )
+    .await
 }
 
 fn try_list_mcp_tools(
@@ -288,6 +378,26 @@ fn build_openai(
     None
 }
 
+fn build_copilot(
+    creds: &dot::auth::Credentials,
+    model: String,
+) -> Option<Box<dyn dot::provider::Provider>> {
+    if let Some(cred) = creds.get("copilot")
+        && let Some(token) = cred.api_key()
+    {
+        return Some(Box::new(dot::provider::copilot::CopilotProvider::new(
+            token.to_string(),
+            model,
+        )));
+    }
+    if let Some(token) = dot::auth::copilot::read_existing_token() {
+        return Some(Box::new(dot::provider::copilot::CopilotProvider::new(
+            token, model,
+        )));
+    }
+    None
+}
+
 fn build_providers(
     config: &dot::config::Config,
     creds: &dot::auth::Credentials,
@@ -297,6 +407,7 @@ fn build_providers(
 
     let anthropic = build_anthropic(creds, model.clone());
     let openai = build_openai(creds, "gpt-4o".to_string());
+    let copilot = build_copilot(creds, "gpt-4o".to_string());
 
     match config.default_provider.as_str() {
         "anthropic" => {
@@ -306,12 +417,29 @@ fn build_providers(
             if let Some(p) = openai {
                 providers.push(p);
             }
+            if let Some(p) = copilot {
+                providers.push(p);
+            }
         }
         "openai" => {
             if let Some(p) = openai {
                 providers.push(p);
             }
             if let Some(p) = anthropic {
+                providers.push(p);
+            }
+            if let Some(p) = copilot {
+                providers.push(p);
+            }
+        }
+        "copilot" => {
+            if let Some(p) = copilot {
+                providers.push(p);
+            }
+            if let Some(p) = anthropic {
+                providers.push(p);
+            }
+            if let Some(p) = openai {
                 providers.push(p);
             }
         }
@@ -323,6 +451,9 @@ fn build_providers(
                 providers.push(p);
             }
             if let Some(p) = openai {
+                providers.push(p);
+            }
+            if let Some(p) = copilot {
                 providers.push(p);
             }
         }

@@ -1,3 +1,4 @@
+pub mod copilot;
 mod login;
 mod oauth;
 mod ui;

@@ -1,3 +1,4 @@
+use super::copilot::copilot_login;
 use super::oauth::oauth_pkce_flow;
 use super::ui::{read_api_key, select_from_menu};
 use super::{Credentials, ProviderCredential};
@@ -9,7 +10,7 @@ use crossterm::{
 use std::io::{self};
 pub async fn login_flow() -> Result<()> {
     let mut stdout = io::stdout();
-    let providers = &["Anthropic", "OpenAI"];
+    let providers = &["Anthropic", "OpenAI", "GitHub Copilot"];
     let provider_idx = match select_from_menu("Select a provider", providers)? {
         Some(i) => i,
         None => {
@@ -64,6 +65,19 @@ pub async fn login_flow() -> Result<()> {
                 stdout,
                 SetForegroundColor(Color::Green),
                 Print("\r\n  ✓ OpenAI credentials saved.\r\n\r\n"),
+                ResetColor,
+            )?;
+        }
+        2 => {
+            let cred = copilot_login().await?;
+            let mut creds = Credentials::load()?;
+            creds.set("copilot", cred);
+            creds.save()?;
+
+            execute!(
+                stdout,
+                SetForegroundColor(Color::Green),
+                Print("\r\n  ✓ GitHub Copilot credentials saved.\r\n\r\n"),
                 ResetColor,
             )?;
         }

@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod copilot;
 pub mod openai;
 
 use std::{future::Future, pin::Pin};

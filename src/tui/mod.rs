@@ -14,12 +14,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use crossterm::cursor::SetCursorStyle;
 use crossterm::{execute, terminal};
 use tokio::sync::{Mutex, mpsc};
 
 use crate::agent::{Agent, AgentProfile};
 use crate::command::CommandRegistry;
-use crate::config::Config;
+use crate::config::{Config, CursorShape};
 use crate::db::Db;
 use crate::extension::HookRegistry;
 use crate::memory::MemoryStore;
@@ -32,6 +33,29 @@ use event::{AppEvent, EventHandler};
 pub struct ExitInfo {
     pub conversation_id: String,
     pub title: Option<String>,
+}
+
+fn cursor_style(shape: &CursorShape, blink: bool) -> SetCursorStyle {
+    match (shape, blink) {
+        (CursorShape::Block, true) => SetCursorStyle::BlinkingBlock,
+        (CursorShape::Block, false) => SetCursorStyle::SteadyBlock,
+        (CursorShape::Underline, true) => SetCursorStyle::BlinkingUnderScore,
+        (CursorShape::Underline, false) => SetCursorStyle::SteadyUnderScore,
+        (CursorShape::Line, true) => SetCursorStyle::BlinkingBar,
+        (CursorShape::Line, false) => SetCursorStyle::SteadyBar,
+    }
+}
+
+fn apply_cursor_style(app: &App) -> Result<()> {
+    let (shape, blink) = if app.vim_mode && app.mode == app::AppMode::Normal {
+        let s = app.cursor_shape_normal.as_ref().unwrap_or(&app.cursor_shape);
+        let b = app.cursor_blink_normal.unwrap_or(app.cursor_blink);
+        (s, b)
+    } else {
+        (&app.cursor_shape, app.cursor_blink)
+    };
+    execute!(std::io::stderr(), cursor_style(shape, blink))?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -83,6 +107,7 @@ pub async fn run(
         crossterm::event::DisableBracketedPaste
     )?;
     terminal.show_cursor()?;
+    execute!(std::io::stderr(), SetCursorStyle::DefaultUserShape)?;
 
     if let Ok(ref info) = result {
         print_exit_screen(info);
@@ -159,6 +184,10 @@ async fn run_app(
         agent_name,
         &config.theme.name,
         config.tui.vim_mode,
+        config.tui.cursor_shape.clone(),
+        config.tui.cursor_blink,
+        config.tui.cursor_shape_normal.clone(),
+        config.tui.cursor_blink_normal,
     );
     app.history = history;
     app.favorite_models = config.tui.favorite_models.clone();
@@ -224,6 +253,7 @@ async fn run_app(
 
     loop {
         terminal.draw(|f| ui::draw(f, &mut app))?;
+        apply_cursor_style(&app)?;
 
         let event = if let Some(ref mut rx) = agent_rx {
             tokio::select! {
@@ -433,6 +463,10 @@ pub async fn run_acp(config: crate::config::Config, client: crate::acp::AcpClien
         agent_name,
         &config.theme.name,
         config.tui.vim_mode,
+        config.tui.cursor_shape.clone(),
+        config.tui.cursor_blink,
+        config.tui.cursor_shape_normal.clone(),
+        config.tui.cursor_blink_normal,
     );
 
     let acp = Arc::new(Mutex::new(client));
@@ -442,6 +476,7 @@ pub async fn run_acp(config: crate::config::Config, client: crate::acp::AcpClien
 
     loop {
         terminal.draw(|f| ui::draw(f, &mut app))?;
+        apply_cursor_style(&app)?;
 
         let event = if let Some(ref mut rx) = agent_rx {
             tokio::select! {
@@ -523,6 +558,7 @@ pub async fn run_acp(config: crate::config::Config, client: crate::acp::AcpClien
         crossterm::event::DisableBracketedPaste
     )?;
     terminal.show_cursor()?;
+    execute!(std::io::stderr(), SetCursorStyle::DefaultUserShape)?;
 
     Ok(())
 }

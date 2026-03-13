@@ -91,12 +91,29 @@ pub struct AgentConfig {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorShape {
+    #[default]
+    Block,
+    Underline,
+    Line,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TuiConfig {
     #[serde(default = "default_true")]
     pub vim_mode: bool,
     #[serde(default)]
     pub favorite_models: Vec<String>,
+    #[serde(default)]
+    pub cursor_shape: CursorShape,
+    #[serde(default)]
+    pub cursor_shape_normal: Option<CursorShape>,
+    #[serde(default = "default_true")]
+    pub cursor_blink: bool,
+    #[serde(default)]
+    pub cursor_blink_normal: Option<bool>,
 }
 
 impl Default for TuiConfig {
@@ -104,6 +121,10 @@ impl Default for TuiConfig {
         Self {
             vim_mode: true,
             favorite_models: Vec::new(),
+            cursor_shape: CursorShape::default(),
+            cursor_shape_normal: None,
+            cursor_blink: true,
+            cursor_blink_normal: None,
         }
     }
 }

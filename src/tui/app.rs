@@ -6,6 +6,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 
 use crate::agent::{AgentEvent, QuestionResponder, TodoItem};
+use crate::config::CursorShape;
 use crate::tui::theme::Theme;
 use crate::tui::tools::{StreamSegment, ToolCallDisplay, ToolCategory, extract_tool_detail};
 use crate::tui::widgets::{
@@ -120,19 +121,19 @@ const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", 
 
 #[derive(Default)]
 pub struct TextSelection {
-    pub anchor: Option<(u16, u16)>,
-    pub end: Option<(u16, u16)>,
+    pub anchor: Option<(u16, u32)>,
+    pub end: Option<(u16, u32)>,
     pub active: bool,
 }
 
 impl TextSelection {
-    pub fn start(&mut self, col: u16, visual_row: u16) {
+    pub fn start(&mut self, col: u16, visual_row: u32) {
         self.anchor = Some((col, visual_row));
         self.end = Some((col, visual_row));
         self.active = true;
     }
 
-    pub fn update(&mut self, col: u16, visual_row: u16) {
+    pub fn update(&mut self, col: u16, visual_row: u32) {
         self.end = Some((col, visual_row));
     }
 
@@ -142,7 +143,7 @@ impl TextSelection {
         self.active = false;
     }
 
-    pub fn ordered(&self) -> Option<((u16, u16), (u16, u16))> {
+    pub fn ordered(&self) -> Option<((u16, u32), (u16, u32))> {
         let a = self.anchor?;
         let e = self.end?;
         if a.1 < e.1 || (a.1 == e.1 && a.0 <= e.0) {
@@ -275,14 +276,15 @@ pub struct RenderCache {
     pub line_to_tool: Vec<Option<(usize, usize)>>,
     pub total_visual: u32,
     pub width: u16,
+    pub wrap_heights: Vec<u32>,
 }
 
 pub struct App {
     pub messages: Vec<ChatMessage>,
     pub input: String,
     pub cursor_pos: usize,
-    pub scroll_offset: u16,
-    pub max_scroll: u16,
+    pub scroll_offset: u32,
+    pub max_scroll: u32,
     pub is_streaming: bool,
     pub current_response: String,
     pub current_thinking: String,
@@ -356,6 +358,11 @@ pub struct App {
     pub cached_model_groups: Option<Vec<(String, Vec<String>)>>,
     pub model_fetch_rx:
         Option<tokio::sync::oneshot::Receiver<(Vec<(String, Vec<String>)>, String, String)>>,
+
+    pub cursor_shape: CursorShape,
+    pub cursor_blink: bool,
+    pub cursor_shape_normal: Option<CursorShape>,
+    pub cursor_blink_normal: Option<bool>,
 }
 impl App {
     pub fn new(
@@ -364,6 +371,10 @@ impl App {
         agent_name: String,
         theme_name: &str,
         vim_mode: bool,
+        cursor_shape: CursorShape,
+        cursor_blink: bool,
+        cursor_shape_normal: Option<CursorShape>,
+        cursor_blink_normal: Option<bool>,
     ) -> Self {
         Self {
             messages: Vec::new(),
@@ -435,6 +446,10 @@ impl App {
             input_at_top: false,
             cached_model_groups: None,
             model_fetch_rx: None,
+            cursor_shape,
+            cursor_blink,
+            cursor_shape_normal,
+            cursor_blink_normal,
         }
     }
 
@@ -994,12 +1009,12 @@ impl App {
         result
     }
 
-    pub fn scroll_up(&mut self, n: u16) {
+    pub fn scroll_up(&mut self, n: u32) {
         self.follow_bottom = false;
         self.scroll_offset = self.scroll_offset.saturating_sub(n);
     }
 
-    pub fn scroll_down(&mut self, n: u16) {
+    pub fn scroll_down(&mut self, n: u32) {
         self.scroll_offset = self.scroll_offset.saturating_add(n).min(self.max_scroll);
         if self.scroll_offset >= self.max_scroll {
             self.follow_bottom = true;

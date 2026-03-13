@@ -10,7 +10,7 @@ fn rect_contains(r: ratatui::layout::Rect, col: u16, row: u16) -> bool {
     col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
 }
 
-fn try_tool_at_row(app: &crate::tui::app::App, visual_row: u16) -> Option<(usize, usize)> {
+fn try_tool_at_row(app: &crate::tui::app::App, visual_row: u32) -> Option<(usize, usize)> {
     app.tool_line_map
         .get(visual_row as usize)
         .copied()
@@ -69,7 +69,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 app.file_picker.up();
                 return InputAction::None;
             }
-            InputAction::ScrollUp(3)
+            InputAction::ScrollUp(4)
         }
         MouseEventKind::ScrollDown => {
             app.selection.clear();
@@ -94,7 +94,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 app.file_picker.down();
                 return InputAction::None;
             }
-            InputAction::ScrollDown(3)
+            InputAction::ScrollDown(4)
         }
         MouseEventKind::Down(MouseButton::Left) => {
             if app.selection.anchor.is_some() && !app.selection.active {
@@ -310,7 +310,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
             } else if rect_contains(app.layout.messages, col, row) {
                 let content_y = app.layout.messages.y;
                 if row >= content_y {
-                    let content_row = row - content_y;
+                    let content_row = (row - content_y) as u32;
                     let visual_row = app.scroll_offset + content_row;
                     let on_tool = try_tool_at_row(app, visual_row)
                         .or_else(|| try_tool_at_row(app, visual_row.saturating_sub(1)))
@@ -338,9 +338,9 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                     .saturating_sub(app.layout.messages.x)
                     .min(app.content_width.saturating_sub(1));
                 let content_row = if row >= content_y {
-                    (row - content_y).min(content_height.saturating_sub(1))
+                    (row - content_y).min(content_height.saturating_sub(1)) as u32
                 } else {
-                    0
+                    0u32
                 };
                 let visual_row = app.scroll_offset + content_row;
                 app.selection.update(content_col, visual_row);
@@ -353,7 +353,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
             {
                 let content_y = app.layout.messages.y;
                 if row >= content_y {
-                    let content_row = row - content_y;
+                    let content_row = (row - content_y) as u32;
                     let visual_row = app.scroll_offset + content_row;
                     let tool = try_tool_at_row(app, visual_row)
                         .or_else(|| try_tool_at_row(app, visual_row.saturating_sub(1)));
@@ -376,9 +376,9 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                     .saturating_sub(app.layout.messages.x)
                     .min(app.content_width.saturating_sub(1));
                 let content_row = if row >= content_y {
-                    (row - content_y).min(content_height.saturating_sub(1))
+                    (row - content_y).min(content_height.saturating_sub(1)) as u32
                 } else {
-                    0
+                    0u32
                 };
                 let visual_row = app.scroll_offset + content_row;
                 app.selection.update(content_col, visual_row);
@@ -508,7 +508,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
             if rect_contains(app.layout.messages, col, row) && !app.is_streaming {
                 let content_y = app.layout.messages.y;
                 if row >= content_y {
-                    let visual_row = (app.scroll_offset + (row - content_y)) as usize;
+                    let visual_row = (app.scroll_offset + (row - content_y) as u32) as usize;
                     if let Some(&msg_idx) = app.message_line_map.get(visual_row) {
                         app.context_menu.open(msg_idx, col, row);
                     }

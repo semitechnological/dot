@@ -67,6 +67,7 @@ pub struct Agent {
     memory_auto_extract: bool,
     memory_inject_count: usize,
     conversation_id: String,
+    persisted: bool,
     messages: Vec<Message>,
     profiles: Vec<AgentProfile>,
     active_profile: usize,
@@ -101,8 +102,7 @@ impl Agent {
     ) -> Result<Self> {
         assert!(!providers.is_empty(), "at least one provider required");
         let providers: Vec<Arc<dyn Provider>> = providers.into_iter().map(Arc::from).collect();
-        let conversation_id =
-            db.create_conversation(providers[0].model(), providers[0].name(), &cwd)?;
+        let conversation_id = uuid::Uuid::new_v4().to_string();
         tracing::debug!("Agent created with conversation {}", conversation_id);
         let mut profiles = if profiles.is_empty() {
             vec![AgentProfile::default_profile()]
@@ -122,6 +122,7 @@ impl Agent {
             memory_auto_extract: config.memory.auto_extract,
             memory_inject_count: config.memory.inject_count,
             conversation_id,
+            persisted: false,
             messages: Vec::new(),
             profiles,
             active_profile: 0,
@@ -139,6 +140,18 @@ impl Agent {
             background_handles: HashMap::new(),
             background_tx: None,
         })
+    }
+    fn ensure_persisted(&mut self) -> Result<()> {
+        if !self.persisted {
+            self.db.create_conversation_with_id(
+                &self.conversation_id,
+                self.provider().model(),
+                self.provider().name(),
+                &self.cwd,
+            )?;
+            self.persisted = true;
+        }
+        Ok(())
     }
     fn provider(&self) -> &dyn Provider {
         &*self.providers[self.active]
@@ -271,23 +284,20 @@ impl Agent {
         }
     }
     pub fn cleanup_if_empty(&mut self) {
-        if self.messages.is_empty() {
+        if self.messages.is_empty() && self.persisted {
             let _ = self.db.delete_conversation(&self.conversation_id);
         }
     }
     pub fn new_conversation(&mut self) -> Result<()> {
         self.cleanup_if_empty();
-        let conversation_id = self.db.create_conversation(
-            self.provider().model(),
-            self.provider().name(),
-            &self.cwd,
-        )?;
-        self.conversation_id = conversation_id;
+        self.conversation_id = uuid::Uuid::new_v4().to_string();
+        self.persisted = false;
         self.messages.clear();
         Ok(())
     }
     pub fn resume_conversation(&mut self, conversation: &crate::db::Conversation) -> Result<()> {
         self.conversation_id = conversation.id.clone();
+        self.persisted = true;
         self.messages = conversation
             .messages
             .iter()
@@ -356,6 +366,7 @@ impl Agent {
         } else {
             content
         };
+        self.ensure_persisted()?;
         let assistant_msg_id =
             self.db
                 .add_message(&self.conversation_id, "assistant", &stored_text)?;
@@ -426,6 +437,7 @@ impl Agent {
             &self.cwd,
         )?;
         self.conversation_id = conversation_id;
+        self.persisted = true;
         self.messages = kept;
         for msg in &self.messages {
             let role = match msg.role {
@@ -603,6 +615,7 @@ impl Agent {
         if !self.provider().supports_server_compaction() && self.should_compact() {
             self.compact(&event_tx).await?;
         }
+        self.ensure_persisted()?;
         self.db
             .add_message(&self.conversation_id, "user", content)?;
         let mut blocks: Vec<ContentBlock> = Vec::new();

@@ -269,17 +269,22 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             all_lines.extend(empty_lines);
         }
 
-        let total_visual = {
-            let p = Paragraph::new(all_lines.clone())
-                .block(block.clone())
-                .wrap(Wrap { trim: false });
-            p.line_count(wrap_width) as u32
-        };
+        let wrap_heights: Vec<u32> = all_lines
+            .iter()
+            .map(|line| {
+                if wrap_width < 1 {
+                    return 1;
+                }
+                let lw: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+                if lw == 0 { 1 } else { (lw as u32).div_ceil(wrap_width as u32) }
+            })
+            .collect();
+        let total_visual: u32 = wrap_heights.iter().sum();
 
         app.content_width = content_width;
         app.visual_lines = compute_visual_lines(&all_lines, wrap_width);
-        app.message_line_map = expand_line_to_msg(&all_lines, &line_to_msg, wrap_width);
-        app.tool_line_map = expand_line_to_tool(&all_lines, &line_to_tool, wrap_width);
+        app.message_line_map = expand_line_to_msg_fast(&wrap_heights, &line_to_msg);
+        app.tool_line_map = expand_line_to_tool_fast(&wrap_heights, &line_to_tool);
 
         app.render_cache = Some(crate::tui::app::RenderCache {
             lines: all_lines,
@@ -287,6 +292,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             line_to_tool,
             total_visual,
             width: content_width,
+            wrap_heights,
         });
         app.render_dirty = false;
     }
@@ -295,15 +301,41 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let total_visual = cache.total_visual;
 
     let visible = content_area.height as u32;
-    app.max_scroll = total_visual.saturating_sub(visible).min(u16::MAX as u32) as u16;
+    app.max_scroll = total_visual.saturating_sub(visible);
     if app.follow_bottom || app.scroll_offset > app.max_scroll {
         app.scroll_offset = app.max_scroll;
     }
 
-    let paragraph = Paragraph::new(cache.lines.clone())
+    let target = app.scroll_offset;
+    let margin = visible.min(50);
+    let skip_visual = target.saturating_sub(margin);
+    let end_visual = target + visible + margin;
+
+    let mut vis: u32 = 0;
+    let mut skip_lines: usize = 0;
+    let mut skip_vis: u32 = 0;
+    let mut end_lines: usize = cache.lines.len();
+    for (i, &w) in cache.wrap_heights.iter().enumerate() {
+        if vis + w <= skip_visual {
+            vis += w;
+            skip_lines = i + 1;
+            skip_vis = vis;
+            continue;
+        }
+        vis += w;
+        if vis >= end_visual {
+            end_lines = i + 1;
+            break;
+        }
+    }
+
+    let render_lines = &cache.lines[skip_lines..end_lines];
+    let render_scroll = (target - skip_vis).min(u16::MAX as u32) as u16;
+
+    let paragraph = Paragraph::new(render_lines.to_vec())
         .block(block)
         .wrap(Wrap { trim: false })
-        .scroll((app.scroll_offset, 0));
+        .scroll((render_scroll, 0));
 
     frame.render_widget(paragraph, paragraph_area);
 
@@ -355,8 +387,13 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             .track_style(app.theme.scrollbar_track)
             .thumb_style(app.theme.scrollbar_thumb);
 
-        let mut state =
-            ScrollbarState::new(app.max_scroll as usize).position(app.scroll_offset as usize);
+        let (sb_total, sb_pos) = if app.max_scroll <= u16::MAX as u32 {
+            (app.max_scroll as usize, app.scroll_offset as usize)
+        } else {
+            let scale = app.max_scroll as f64 / u16::MAX as f64;
+            ((u16::MAX as usize), (app.scroll_offset as f64 / scale) as usize)
+        };
+        let mut state = ScrollbarState::new(sb_total).position(sb_pos);
         frame.render_stateful_widget(scrollbar, scrollbar_area, &mut state);
     }
 }
@@ -853,12 +890,9 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     let paragraph = Paragraph::new(wrapped).style(text_style);
     frame.render_widget(paragraph, inner);
     if can_edit && !app.model_selector.visible && (has_input || !app.is_streaming) {
-        let blink_on = (app.tick_count / 32).is_multiple_of(2);
-        if blink_on {
-            let (cx, cy) = cursor_position(&app.input, app.cursor_pos, inner);
-            if cy < inner.y + inner.height {
-                frame.set_cursor_position((cx, cy));
-            }
+        let (cx, cy) = cursor_position(&app.input, app.cursor_pos, inner);
+        if cy < inner.y + inner.height {
+            frame.set_cursor_position((cx, cy));
         }
     }
 }
@@ -1124,7 +1158,7 @@ fn render_selection_highlight(frame: &mut Frame, app: &App, area: Rect) {
     let ((sc, sr), (ec, er)) = range;
 
     let content_y = area.y;
-    let content_height = area.height;
+    let content_height = area.height as u32;
     let scroll = app.scroll_offset;
 
     let buf = frame.buffer_mut();
@@ -1137,7 +1171,7 @@ fn render_selection_highlight(frame: &mut Frame, app: &App, area: Rect) {
         if screen_row_offset >= content_height {
             break;
         }
-        let screen_y = content_y + screen_row_offset;
+        let screen_y = content_y + screen_row_offset as u16;
 
         let row_start = if vis_row == sr { sc } else { 0 };
         let row_end = if vis_row == er { ec } else { area.width };
@@ -1155,44 +1189,26 @@ fn render_selection_highlight(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn expand_line_to_tool(
-    lines: &[Line],
+fn expand_line_to_tool_fast(
+    wrap_heights: &[u32],
     line_to_tool: &[Option<(usize, usize)>],
-    width: u16,
 ) -> Vec<Option<(usize, usize)>> {
     let mut result = Vec::new();
-    for (i, line) in lines.iter().enumerate() {
+    for (i, &h) in wrap_heights.iter().enumerate() {
         let tool = line_to_tool.get(i).copied().flatten();
-        let wrapped = if width < 1 {
-            1
-        } else {
-            Paragraph::new(vec![line.clone()])
-                .wrap(Wrap { trim: false })
-                .line_count(width)
-        };
-        for _ in 0..wrapped {
+        for _ in 0..h {
             result.push(tool);
         }
     }
     result
 }
 
-fn expand_line_to_msg(lines: &[Line], line_to_msg: &[usize], width: u16) -> Vec<usize> {
+fn expand_line_to_msg_fast(wrap_heights: &[u32], line_to_msg: &[usize]) -> Vec<usize> {
     let mut result = Vec::new();
-    for (i, line) in lines.iter().enumerate() {
+    for (i, &h) in wrap_heights.iter().enumerate() {
         let msg_idx = line_to_msg.get(i).copied().unwrap_or(0);
-        if width == 0 {
+        for _ in 0..h {
             result.push(msg_idx);
-        } else {
-            let w = line.width();
-            let wrapped = if w == 0 {
-                1
-            } else {
-                (w as u32).div_ceil(width as u32).max(1)
-            };
-            for _ in 0..wrapped {
-                result.push(msg_idx);
-            }
         }
     }
     result

@@ -1,11 +1,11 @@
-use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::Frame;
 
 use crate::tui::app::App;
-use crate::tui::widgets::{COMMANDS, PaletteEntryKind, ThinkingLevel};
+use crate::tui::widgets::{PaletteEntryKind, ThinkingLevel, COMMANDS};
 
 fn popup_block(title: &str, _accent: Color, _muted: Color) -> Block<'static> {
     let line = Line::from(vec![
@@ -304,39 +304,22 @@ pub fn draw_empty_state(app: &App, width: u16) -> Vec<Line<'static>> {
         "@@@@@@@@@@@@@@@@@@@@@@@@@",
         "@@@@@@@@@@@@@@@@@@@@@@@@@",
     ];
-    let art_w = 25u16;
-    let art_pad = " ".repeat((width.saturating_sub(art_w) / 2) as usize);
-
     let subtitle = "a terminal-native ai agent";
-    let sub_pad = " ".repeat((width.saturating_sub(subtitle.len() as u16) / 2) as usize);
-
     let sep = "\u{2500}".repeat(7);
-    let sep_pad = " ".repeat((width.saturating_sub(7) / 2) as usize);
-
     let hints = "/help \u{00b7} /model \u{00b7} /sessions";
-    let hints_pad = " ".repeat((width.saturating_sub(hints.len() as u16) / 2) as usize);
 
     let mut lines = vec![Line::from(""), Line::from(""), Line::from("")];
 
     for a in &art {
-        lines.push(Line::from(Span::styled(format!("{}{}", art_pad, *a), dim)));
+        lines.push(Line::from(Span::styled(*a, dim)).alignment(Alignment::Center));
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("{}{}", sub_pad, subtitle),
-        dim,
-    )));
+    lines.push(Line::from(Span::styled(subtitle, dim)).alignment(Alignment::Center));
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("{}{}", sep_pad, sep),
-        app.theme.border,
-    )));
+    lines.push(Line::from(Span::styled(sep, app.theme.border)).alignment(Alignment::Center));
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("{}{}", hints_pad, hints),
-        dim,
-    )));
+    lines.push(Line::from(Span::styled(hints, dim)).alignment(Alignment::Center));
     lines.push(Line::from(""));
 
     lines

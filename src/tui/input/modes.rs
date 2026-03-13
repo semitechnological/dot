@@ -24,15 +24,23 @@ pub(super) fn handle_normal(app: &mut App, key: KeyEvent) -> InputAction {
         KeyCode::Char('j') | KeyCode::Down => InputAction::ScrollDown(1),
         KeyCode::Char('k') | KeyCode::Up => InputAction::ScrollUp(1),
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            InputAction::ScrollDown(10)
+            let half = (app.layout.messages.height / 2).max(1) as u32;
+            InputAction::ScrollDown(half)
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            InputAction::ScrollUp(10)
+            let half = (app.layout.messages.height / 2).max(1) as u32;
+            InputAction::ScrollUp(half)
         }
         KeyCode::Char('g') => InputAction::ScrollToTop,
         KeyCode::Char('G') => InputAction::ScrollToBottom,
-        KeyCode::PageUp => InputAction::ScrollUp(20),
-        KeyCode::PageDown => InputAction::ScrollDown(20),
+        KeyCode::PageUp => {
+            let page = app.layout.messages.height.max(1) as u32;
+            InputAction::ScrollUp(page)
+        }
+        KeyCode::PageDown => {
+            let page = app.layout.messages.height.max(1) as u32;
+            InputAction::ScrollDown(page)
+        }
         KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             InputAction::ClearConversation
         }
@@ -197,7 +205,10 @@ pub(super) fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
                 app.delete_to_start();
                 return InputAction::None;
             }
-            KeyCode::Char('d') => return InputAction::ScrollDown(10),
+            KeyCode::Char('d') => {
+                let half = (app.layout.messages.height / 2).max(1) as u32;
+                return InputAction::ScrollDown(half);
+            }
             KeyCode::Char('j') => {
                 if !app.input.is_empty() {
                     app.insert_char('\n');
@@ -225,8 +236,14 @@ pub(super) fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
                 }
                 InputAction::None
             }
-            KeyCode::PageUp => InputAction::ScrollUp(20),
-            KeyCode::PageDown => InputAction::ScrollDown(20),
+            KeyCode::PageUp => {
+                let page = app.layout.messages.height.max(1) as u32;
+                InputAction::ScrollUp(page)
+            }
+            KeyCode::PageDown => {
+                let page = app.layout.messages.height.max(1) as u32;
+                InputAction::ScrollDown(page)
+            }
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 if !app.input.is_empty() {
                     app.insert_char('\n');
@@ -277,8 +294,14 @@ pub(super) fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
             }
             InputAction::None
         }
-        KeyCode::PageUp => InputAction::ScrollUp(20),
-        KeyCode::PageDown => InputAction::ScrollDown(20),
+        KeyCode::PageUp => {
+            let page = app.layout.messages.height.max(1) as u32;
+            InputAction::ScrollUp(page)
+        }
+        KeyCode::PageDown => {
+            let page = app.layout.messages.height.max(1) as u32;
+            InputAction::ScrollDown(page)
+        }
         KeyCode::Tab => InputAction::ToggleAgent,
         KeyCode::Char(c) => handle_char_input(app, c),
         KeyCode::Backspace => handle_backspace(app),

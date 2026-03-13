@@ -2,7 +2,7 @@ pub(crate) mod schema;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -111,6 +111,17 @@ impl Db {
 
     pub fn create_conversation(&self, model: &str, provider: &str, cwd: &str) -> Result<String> {
         let id = Uuid::new_v4().to_string();
+        self.create_conversation_with_id(&id, model, provider, cwd)?;
+        Ok(id)
+    }
+
+    pub fn create_conversation_with_id(
+        &self,
+        id: &str,
+        model: &str,
+        provider: &str,
+        cwd: &str,
+    ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         self.conn
             .execute(
@@ -120,7 +131,7 @@ impl Db {
             )
             .context("Failed to create conversation")?;
         tracing::debug!("Created conversation {}", id);
-        Ok(id)
+        Ok(())
     }
 
     pub fn list_conversations(&self, limit: usize) -> Result<Vec<ConversationSummary>> {

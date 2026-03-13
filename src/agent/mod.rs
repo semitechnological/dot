@@ -18,6 +18,7 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
+use uuid::Uuid;
 
 const COMPACT_THRESHOLD: f32 = 0.8;
 const COMPACT_KEEP_MESSAGES: usize = 10;
@@ -28,6 +29,15 @@ const MEMORY_INSTRUCTIONS: &str = "\n\n\
 You have persistent memory across conversations. **Core blocks** (above) are always visible — update them via `core_memory_update` for essential user/agent facts. **Archival memory** is searched per turn — use `memory_add`/`memory_search`/`memory_list`/`memory_delete` to manage it.
 
 When the user says \"remember\"/\"forget\"/\"what do you know about me\", use the appropriate memory tool. Memories are also auto-extracted in the background, so focus on explicit requests.";
+
+/// Tool call data for persisting an interrupted assistant message.
+#[derive(Debug, Clone)]
+pub struct InterruptedToolCall {
+    pub name: String,
+    pub input: String,
+    pub output: Option<String>,
+    pub is_error: bool,
+}
 
 const TITLE_SYSTEM_PROMPT: &str = "\
 You are a title generator. You output ONLY a thread title. Nothing else.
@@ -197,7 +207,13 @@ impl Agent {
     pub fn available_models(&self) -> Vec<String> {
         self.provider().available_models()
     }
-    pub async fn fetch_all_models(&self) -> Vec<(String, Vec<String>)> {
+    pub fn cached_all_models(&self) -> Vec<(String, Vec<String>)> {
+        self.providers
+            .iter()
+            .map(|p| (p.name().to_string(), p.available_models()))
+            .collect()
+    }
+    pub async fn fetch_all_models(&mut self) -> Vec<(String, Vec<String>)> {
         let mut result = Vec::new();
         for p in &self.providers {
             let models = match p.fetch_models().await {
@@ -288,6 +304,68 @@ impl Agent {
         {
             let ctx = self.event_context(&Event::OnResume);
             self.hooks.emit(&Event::OnResume, &ctx);
+        }
+        Ok(())
+    }
+
+    /// Add an interrupted (cancelled) assistant message to context and DB so the
+    /// model sees it on the next send and can continue from where it stopped.
+    pub fn add_interrupted_message(
+        &mut self,
+        content: String,
+        tool_calls: Vec<InterruptedToolCall>,
+        thinking: Option<String>,
+    ) -> Result<()> {
+        let mut blocks: Vec<ContentBlock> = Vec::new();
+        if let Some(t) = thinking {
+            if !t.is_empty() {
+                blocks.push(ContentBlock::Thinking {
+                    thinking: t,
+                    signature: String::new(),
+                });
+            }
+        }
+        if !content.is_empty() {
+            blocks.push(ContentBlock::Text(content.clone()));
+        }
+        let mut tool_ids: Vec<String> = Vec::new();
+        for tc in &tool_calls {
+            let id = Uuid::new_v4().to_string();
+            tool_ids.push(id.clone());
+            let input_value: serde_json::Value =
+                serde_json::from_str(&tc.input).unwrap_or_else(|_| serde_json::json!({}));
+            blocks.push(ContentBlock::ToolUse {
+                id: id.clone(),
+                name: tc.name.clone(),
+                input: input_value,
+            });
+        }
+        for (tc, id) in tool_calls.iter().zip(tool_ids.iter()) {
+            blocks.push(ContentBlock::ToolResult {
+                tool_use_id: id.clone(),
+                content: tc.output.clone().unwrap_or_default(),
+                is_error: tc.is_error,
+            });
+        }
+        self.messages.push(Message {
+            role: Role::Assistant,
+            content: blocks,
+        });
+        let stored_text = if content.is_empty() {
+            String::from("[tool use]")
+        } else {
+            content
+        };
+        let assistant_msg_id =
+            self.db
+                .add_message(&self.conversation_id, "assistant", &stored_text)?;
+        for (tc, id) in tool_calls.iter().zip(tool_ids.iter()) {
+            let _ = self
+                .db
+                .add_tool_call(&assistant_msg_id, id, &tc.name, &tc.input);
+            if let Some(ref output) = tc.output {
+                let _ = self.db.update_tool_result(id, output, tc.is_error);
+            }
         }
         Ok(())
     }

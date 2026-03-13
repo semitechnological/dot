@@ -7,16 +7,16 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use crate::tui::app::App;
 use crate::tui::widgets::{COMMANDS, PaletteEntryKind, ThinkingLevel};
 
-fn popup_block(title: &str, theme_accent: Color, theme_muted: Color) -> Block<'static> {
+fn popup_block(title: &str, _accent: Color, _muted: Color) -> Block<'static> {
+    let line = Line::from(vec![
+        Span::styled("\u{2500} ", Style::default().fg(Color::Indexed(8))),
+        Span::raw(title.to_owned()),
+        Span::raw(" "),
+    ]);
     Block::default()
-        .title(Span::styled(
-            format!(" {} ", title),
-            Style::default()
-                .fg(theme_accent)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(line)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme_muted))
+        .border_style(Style::default().fg(Color::Indexed(8)))
 }
 
 fn centered_popup(area: Rect, content_width: usize, content_height: usize) -> Rect {
@@ -45,9 +45,7 @@ pub fn draw_model_selector(frame: &mut Frame, app: &mut App) {
             }
             content_lines.push(Line::from(Span::styled(
                 format!("  {}", entry.provider),
-                Style::default()
-                    .fg(app.theme.muted_fg)
-                    .add_modifier(Modifier::BOLD),
+                app.theme.dim,
             )));
             last_provider = Some(&entry.provider);
         }
@@ -55,29 +53,25 @@ pub fn draw_model_selector(frame: &mut Frame, app: &mut App) {
         let is_current = entry.provider == sel.current_provider && entry.model == sel.current_model;
         let is_sel = item_idx == sel.selected;
 
-        let (prefix, marker_style) = if is_sel {
-            ("\u{25b8} ", Style::default().fg(app.theme.accent))
+        let prefix = if is_sel { "\u{203a} " } else { "  " };
+        let marker_style = if is_sel {
+            Style::default()
         } else {
-            ("  ", Style::default().fg(app.theme.muted_fg))
+            app.theme.dim
         };
 
         let name_style = if is_sel {
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD)
+            Style::default().add_modifier(Modifier::BOLD)
         } else if is_current {
-            Style::default().fg(app.theme.accent)
+            Style::default()
         } else {
-            Style::default().fg(Color::Reset)
+            Style::default()
         };
 
         let is_fav = sel.favorites.contains(&entry.model);
-        let star = if is_fav { "★ " } else { "  " };
+        let star = if is_fav { "\u{2605} " } else { "  " };
         let mut spans = vec![Span::styled(format!("  {}", prefix), marker_style)];
-        spans.push(Span::styled(
-            star.to_string(),
-            Style::default().fg(app.theme.accent),
-        ));
+        spans.push(Span::styled(star.to_string(), app.theme.dim));
         spans.push(Span::styled(
             crate::tui::ui::display_model(&entry.model),
             name_style,
@@ -90,7 +84,7 @@ pub fn draw_model_selector(frame: &mut Frame, app: &mut App) {
     }
 
     let search_line = format!(" /{}", sel.query);
-    let footer = "↑↓ select  enter confirm  s/* favorite  esc cancel";
+    let footer = "\u{2191}\u{2193} select  enter confirm  s/* favorite  esc cancel";
     let content_width = content_lines
         .iter()
         .map(|l| l.width())
@@ -118,7 +112,7 @@ pub fn draw_model_selector(frame: &mut Frame, app: &mut App) {
         Line::from(vec![
             Span::styled(" ", Style::default()),
             Span::raw(sel.query.clone()),
-            Span::styled("\u{258f}", Style::default().fg(app.theme.accent)),
+            Span::styled("\u{258f}", Style::default()),
         ])
     };
     all_lines.push(search_display);
@@ -144,27 +138,22 @@ pub fn draw_agent_selector(frame: &mut Frame, app: &mut App) {
         let is_current = entry.name == sel.current;
         let is_sel = i == sel.selected;
 
-        let (prefix, marker_style) = if is_sel {
-            ("\u{25b8} ", Style::default().fg(app.theme.accent))
+        let prefix = if is_sel { "\u{203a} " } else { "  " };
+        let marker_style = if is_sel {
+            Style::default()
         } else {
-            ("  ", Style::default())
+            Style::default()
         };
 
         let name_style = if is_sel {
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD)
+            Style::default().add_modifier(Modifier::BOLD)
         } else if is_current {
-            Style::default().fg(app.theme.accent)
+            Style::default()
         } else {
-            Style::default().fg(Color::Reset)
+            Style::default()
         };
 
-        let desc_style = if is_sel {
-            Style::default().fg(app.theme.accent)
-        } else {
-            app.theme.dim
-        };
+        let desc_style = app.theme.dim;
 
         let mut spans = vec![Span::styled(format!("  {}", prefix), marker_style)];
         spans.push(Span::styled(entry.name.clone(), name_style));
@@ -239,7 +228,7 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.muted_fg));
+        .border_style(Style::default().fg(Color::Indexed(8)));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
@@ -257,16 +246,14 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
         let prefix = if is_skill { "\u{25c7} " } else { "/ " };
         let mut spans = if is_sel {
             vec![
-                Span::styled(" \u{25b8} ", Style::default().fg(app.theme.accent)),
+                Span::styled(" \u{203a} ", Style::default()),
                 Span::styled(
                     format!("{}{:<width$}", prefix, entry.name, width = name_w),
-                    Style::default()
-                        .fg(app.theme.accent)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("{:<width$}", entry.description, width = desc_w),
-                    Style::default().fg(app.theme.accent),
+                    app.theme.dim,
                 ),
             ]
         } else {
@@ -274,7 +261,7 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
                 Span::raw("   "),
                 Span::styled(
                     format!("{}{:<width$}", prefix, entry.name, width = name_w),
-                    Style::default().fg(Color::Reset),
+                    Style::default(),
                 ),
                 Span::styled(
                     format!("{:<width$}", entry.description, width = desc_w),
@@ -283,10 +270,7 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
             ]
         };
         if !entry.shortcut.is_empty() && !compact {
-            spans.push(Span::styled(
-                entry.shortcut.clone(),
-                Style::default().fg(app.theme.muted_fg),
-            ));
+            spans.push(Span::styled(entry.shortcut.clone(), app.theme.dim));
         }
         cmd_lines.push(Line::from(spans));
     }
@@ -295,70 +279,64 @@ pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) 
 }
 
 pub fn draw_empty_state(app: &App, width: u16) -> Vec<Line<'static>> {
-    let accent = app.theme.accent;
     let dim = app.theme.dim;
-    let border_style = app.theme.border;
-    let muted = app.theme.muted_fg;
     let compact = width < 55;
-    let pad = if compact { "   " } else { "       " };
-
-    let mut lines = vec![
-        Line::from(""),
-        Line::from(""),
-        Line::from(""),
-        Line::from(Span::styled(
-            format!("{}\u{25c6}", pad),
-            Style::default().fg(accent).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            format!("{}dot", pad),
-            Style::default().fg(accent).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            format!("{}a terminal-native ai agent", pad),
-            dim,
-        )),
-        Line::from(""),
-    ];
 
     if compact {
-        lines.push(Line::from(Span::styled(
-            format!("{}type a message to begin", pad),
-            Style::default().fg(muted),
-        )));
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled(format!("{}  /help", pad), dim),
-            Span::styled("  /model", dim),
-            Span::styled("  /sessions", dim),
-        ]));
-    } else {
-        let sep_width = 28usize.min((width as usize).saturating_sub(8));
-        let sep = "\u{2500}".repeat(sep_width);
-        lines.push(Line::from(Span::styled(
-            format!("{}{}", pad, sep),
-            border_style,
-        )));
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            format!("{}type a message to begin", pad),
-            Style::default().fg(muted),
-        )));
-        lines.push(Line::from(""));
-        for (key, desc) in [
-            ("/help", "commands & keybindings"),
-            ("/model", "switch model"),
-            ("/sessions", "resume a conversation"),
-        ] {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{}  {:<12}", pad, key), Style::default().fg(muted)),
-                Span::styled(desc, dim),
-            ]));
-        }
+        return vec![
+            Line::from(""),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("  \u{25c6} "),
+                Span::styled("dot", Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(Span::styled("  type a message to begin", dim)),
+            Line::from(""),
+        ];
+    }
+
+    let art = [
+        "     _       _   ",
+        "  __| | ___ | |_ ",
+        " / _` |/ _ \\| __|",
+        "| (_| | (_) | |_ ",
+        " \\__,_|\\___/ \\__|",
+    ];
+    let art_w = 18u16;
+    let art_pad = " ".repeat((width.saturating_sub(art_w) / 2) as usize);
+
+    let subtitle = "a terminal-native ai agent";
+    let sub_pad = " ".repeat((width.saturating_sub(subtitle.len() as u16) / 2) as usize);
+
+    let sep = "\u{2500}".repeat(7);
+    let sep_pad = " ".repeat((width.saturating_sub(7) / 2) as usize);
+
+    let hints = "/help \u{00b7} /model \u{00b7} /sessions";
+    let hints_pad = " ".repeat((width.saturating_sub(hints.len() as u16) / 2) as usize);
+
+    let mut lines = vec![Line::from(""), Line::from(""), Line::from("")];
+
+    for a in &art {
+        lines.push(Line::from(Span::styled(format!("{}{}", art_pad, *a), dim)));
     }
 
     lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("{}{}", sub_pad, subtitle),
+        dim,
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("{}{}", sep_pad, sep),
+        app.theme.border,
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("{}{}", hints_pad, hints),
+        dim,
+    )));
+    lines.push(Line::from(""));
+
     lines
 }
 
@@ -375,27 +353,22 @@ pub fn draw_thinking_selector(frame: &mut Frame, app: &mut App) {
         let is_current = level == sel.current;
         let is_sel = i == sel.selected;
 
-        let (prefix, marker_style) = if is_sel {
-            ("\u{25b8} ", Style::default().fg(app.theme.accent))
+        let prefix = if is_sel { "\u{203a} " } else { "  " };
+        let marker_style = if is_sel {
+            Style::default()
         } else {
-            ("  ", Style::default())
+            Style::default()
         };
 
         let name_style = if is_sel {
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD)
+            Style::default().add_modifier(Modifier::BOLD)
         } else if is_current {
-            Style::default().fg(app.theme.accent)
+            Style::default()
         } else {
-            Style::default().fg(Color::Reset)
+            Style::default()
         };
 
-        let desc_style = if is_sel {
-            Style::default().fg(app.theme.accent)
-        } else {
-            app.theme.dim
-        };
+        let desc_style = app.theme.dim;
 
         let mut spans = vec![Span::styled(format!("  {}", prefix), marker_style)];
         spans.push(Span::styled(level.label().to_string(), name_style));
@@ -440,10 +413,8 @@ pub fn draw_thinking_selector(frame: &mut Frame, app: &mut App) {
 pub fn draw_help_popup(frame: &mut Frame, app: &mut App) {
     let mut content_lines: Vec<Line<'static>> = Vec::new();
 
-    let heading = Style::default()
-        .fg(app.theme.accent)
-        .add_modifier(Modifier::BOLD);
-    let key_style = Style::default().fg(Color::Reset);
+    let heading = Style::default().add_modifier(Modifier::BOLD);
+    let key_style = Style::default();
     let desc_style = app.theme.dim;
 
     content_lines.push(Line::from(Span::styled(" commands", heading)));
@@ -456,10 +427,7 @@ pub fn draw_help_popup(frame: &mut Frame, app: &mut App) {
         if !c.shortcut.is_empty() {
             let pad = 24usize.saturating_sub(c.description.len());
             spans.push(Span::styled(" ".repeat(pad), desc_style));
-            spans.push(Span::styled(
-                c.shortcut.to_string(),
-                Style::default().fg(app.theme.muted_fg),
-            ));
+            spans.push(Span::styled(c.shortcut.to_string(), app.theme.dim));
         }
         content_lines.push(Line::from(spans));
     }
@@ -554,31 +522,15 @@ pub fn draw_session_selector(frame: &mut Frame, app: &mut App) {
         let is_sel = item_idx == sel.selected;
 
         let (prefix, title_style) = if is_sel {
-            (
-                "\u{25b8} ",
-                Style::default()
-                    .fg(app.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            )
+            ("\u{203a} ", Style::default().add_modifier(Modifier::BOLD))
         } else {
-            ("  ", Style::default().fg(Color::Reset))
+            ("  ", Style::default())
         };
 
-        let sub_style = if is_sel {
-            Style::default().fg(app.theme.accent)
-        } else {
-            app.theme.dim
-        };
+        let sub_style = app.theme.dim;
 
         content_lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {}", prefix),
-                if is_sel {
-                    Style::default().fg(app.theme.accent)
-                } else {
-                    Style::default()
-                },
-            ),
+            Span::styled(format!("  {}", prefix), Style::default()),
             Span::styled(entry.title.clone(), title_style),
             Span::styled(format!("  {}", entry.subtitle), sub_style),
         ]));
@@ -618,7 +570,7 @@ pub fn draw_session_selector(frame: &mut Frame, app: &mut App) {
         Line::from(vec![
             Span::styled(" ", Style::default()),
             Span::raw(sel.query.clone()),
-            Span::styled("\u{258f}", Style::default().fg(app.theme.accent)),
+            Span::styled("\u{258f}", Style::default()),
         ])
     };
 
@@ -660,7 +612,7 @@ pub fn draw_context_menu(frame: &mut Frame, app: &mut App) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.muted_fg));
+        .border_style(Style::default().fg(Color::Indexed(8)));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
@@ -668,13 +620,11 @@ pub fn draw_context_menu(frame: &mut Frame, app: &mut App) {
     for (i, label) in labels.iter().enumerate() {
         let is_sel = i == menu.selected;
         let style = if is_sel {
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD)
+            Style::default().add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Reset)
+            Style::default()
         };
-        let prefix = if is_sel { " \u{25b8} " } else { "   " };
+        let prefix = if is_sel { " \u{203a} " } else { "   " };
         lines.push(Line::from(Span::styled(
             format!("{}{}", prefix, label),
             style,
@@ -693,21 +643,16 @@ pub fn draw_question_popup(frame: &mut Frame, app: &mut App) {
     let mut content_lines: Vec<Line<'static>> = Vec::new();
     content_lines.push(Line::from(Span::styled(
         format!(" {}", pq.question),
-        Style::default().fg(Color::Reset),
+        Style::default(),
     )));
     content_lines.push(Line::from(""));
 
     for (i, opt) in pq.options.iter().enumerate() {
         let is_sel = i == pq.selected;
         let (prefix, style) = if is_sel {
-            (
-                "\u{25b8} ",
-                Style::default()
-                    .fg(app.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            )
+            ("\u{203a} ", Style::default().add_modifier(Modifier::BOLD))
         } else {
-            ("  ", Style::default().fg(Color::Reset))
+            ("  ", Style::default())
         };
         content_lines.push(Line::from(Span::styled(
             format!("  {}{}", prefix, opt),
@@ -715,12 +660,9 @@ pub fn draw_question_popup(frame: &mut Frame, app: &mut App) {
         )));
     }
 
-    // Custom input row
     let custom_sel = pq.selected >= pq.options.len();
     let custom_style = if custom_sel {
-        Style::default()
-            .fg(app.theme.accent)
-            .add_modifier(Modifier::BOLD)
+        Style::default().add_modifier(Modifier::BOLD)
     } else {
         app.theme.dim
     };
@@ -731,12 +673,8 @@ pub fn draw_question_popup(frame: &mut Frame, app: &mut App) {
     };
     content_lines.push(Line::from(vec![
         Span::styled(
-            if custom_sel { "  \u{25b8} " } else { "    " },
-            if custom_sel {
-                Style::default().fg(app.theme.accent)
-            } else {
-                Style::default()
-            },
+            if custom_sel { "  \u{203a} " } else { "    " },
+            Style::default(),
         ),
         Span::styled(custom_text, custom_style),
     ]));
@@ -780,9 +718,7 @@ pub fn draw_permission_popup(frame: &mut Frame, app: &mut App) {
     let mut content_lines: Vec<Line<'static>> = Vec::new();
     content_lines.push(Line::from(Span::styled(
         format!(" Allow {}?", pp.tool_name),
-        Style::default()
-            .fg(Color::Reset)
-            .add_modifier(Modifier::BOLD),
+        Style::default().add_modifier(Modifier::BOLD),
     )));
     content_lines.push(Line::from(Span::styled(
         format!(" {}", &pp.input_summary[..pp.input_summary.len().min(60)]),
@@ -794,14 +730,9 @@ pub fn draw_permission_popup(frame: &mut Frame, app: &mut App) {
     for (i, label) in labels.iter().enumerate() {
         let is_sel = i == pp.selected;
         let (prefix, style) = if is_sel {
-            (
-                "\u{25b8} ",
-                Style::default()
-                    .fg(app.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            )
+            ("\u{203a} ", Style::default().add_modifier(Modifier::BOLD))
         } else {
-            ("  ", Style::default().fg(Color::Reset))
+            ("  ", Style::default())
         };
         content_lines.push(Line::from(Span::styled(
             format!("  {}{}", prefix, label),
@@ -841,10 +772,10 @@ pub fn draw_permission_popup(frame: &mut Frame, app: &mut App) {
 
 pub fn draw_rename_popup(frame: &mut Frame, app: &App) {
     let footer = "enter save  esc cancel";
-    let display = format!("{}▏", app.rename_input);
+    let display = format!("{}\u{258f}", app.rename_input);
     let content_lines: Vec<Line<'static>> = vec![Line::from(vec![
         Span::raw(" "),
-        Span::styled(display, Style::default().fg(app.theme.accent)),
+        Span::styled(display, Style::default()),
     ])];
     let content_width = content_lines
         .iter()
@@ -898,7 +829,7 @@ pub fn draw_file_picker(frame: &mut Frame, app: &mut App, input_area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.muted_fg));
+        .border_style(Style::default().fg(Color::Indexed(8)));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
@@ -912,7 +843,7 @@ pub fn draw_file_picker(frame: &mut Frame, app: &mut App, input_area: Rect) {
     let mut lines: Vec<Line<'static>> = Vec::new();
     for (i, entry) in items.iter().enumerate().skip(scroll).take(visible_count) {
         let is_sel = i == picker.selected;
-        let icon = if entry.is_dir { "\u{25b8} " } else { "  " };
+        let icon = if entry.is_dir { "\u{203a} " } else { "  " };
         let display = if entry.is_dir {
             format!("{}/", entry.path)
         } else {
@@ -920,12 +851,10 @@ pub fn draw_file_picker(frame: &mut Frame, app: &mut App, input_area: Rect) {
         };
         if is_sel {
             lines.push(Line::from(vec![
-                Span::styled(" \u{25b8} ", Style::default().fg(app.theme.accent)),
+                Span::styled(" \u{203a} ", Style::default()),
                 Span::styled(
                     format!("{}{}", icon, display),
-                    Style::default()
-                        .fg(app.theme.accent)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().add_modifier(Modifier::BOLD),
                 ),
             ]));
         } else {
@@ -934,9 +863,9 @@ pub fn draw_file_picker(frame: &mut Frame, app: &mut App, input_area: Rect) {
                 Span::styled(
                     format!("{}{}", icon, display),
                     if entry.is_dir {
-                        Style::default().fg(app.theme.muted_fg)
+                        app.theme.dim
                     } else {
-                        Style::default().fg(Color::Reset)
+                        Style::default()
                     },
                 ),
             ]));

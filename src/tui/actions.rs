@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, mpsc};
 
-use crate::agent::Agent;
+use crate::agent::{Agent, InterruptedToolCall};
 use crate::tui::app::{self, App, ChatMessage};
 use crate::tui::input::InputAction;
 use crate::tui::tools::StreamSegment;
@@ -62,6 +62,7 @@ pub async fn dispatch_acp_action(
                     thinking,
                     model: Some(app.model_name.clone()),
                     segments: Some(std::mem::take(&mut app.streaming_segments)),
+                    chips: None,
                 });
             } else {
                 app.current_response.clear();
@@ -96,34 +97,53 @@ pub async fn dispatch_acp_action(
                                     use crate::acp::types::SessionUpdate;
                                     match n.update {
                                         SessionUpdate::AgentMessageChunk { content } => {
-                                            if let crate::acp::ContentBlock::Text { text } = content {
-                                                let _ = tx.send(crate::agent::AgentEvent::TextDelta(text));
+                                            if let crate::acp::ContentBlock::Text { text } = content
+                                            {
+                                                let _ = tx.send(
+                                                    crate::agent::AgentEvent::TextDelta(text),
+                                                );
                                             }
                                         }
                                         SessionUpdate::ThoughtChunk { content } => {
-                                            if let crate::acp::ContentBlock::Text { text } = content {
-                                                let _ = tx.send(crate::agent::AgentEvent::ThinkingDelta(text));
+                                            if let crate::acp::ContentBlock::Text { text } = content
+                                            {
+                                                let _ = tx.send(
+                                                    crate::agent::AgentEvent::ThinkingDelta(text),
+                                                );
                                             }
                                         }
-                                                SessionUpdate::ToolCall { tool_call_id, title, status, content, raw_input, .. } => {
-                                                            let _ = tx.send(crate::agent::AgentEvent::ToolCallStart {
-                                                                id: tool_call_id.clone(),
-                                                                name: title.clone(),
-                                                            });
-                                                            if status == crate::acp::ToolCallStatus::InProgress {
-                                                                let input = raw_input
-                                                                    .as_ref()
-                                                                    .map(|v| serde_json::to_string_pretty(v).unwrap_or_default())
-                                                                    .unwrap_or_default();
-                                                                let _ = tx.send(crate::agent::AgentEvent::ToolCallExecuting {
-                                                                    id: tool_call_id.clone(),
-                                                                    name: title.clone(),
-                                                                    input,
-                                                                });
-                                                            }
-                                                            if status == crate::acp::ToolCallStatus::Completed
-                                                                || status == crate::acp::ToolCallStatus::Failed
-                                                            {
+                                        SessionUpdate::ToolCall {
+                                            tool_call_id,
+                                            title,
+                                            status,
+                                            content,
+                                            raw_input,
+                                            ..
+                                        } => {
+                                            let _ =
+                                                tx.send(crate::agent::AgentEvent::ToolCallStart {
+                                                    id: tool_call_id.clone(),
+                                                    name: title.clone(),
+                                                });
+                                            if status == crate::acp::ToolCallStatus::InProgress {
+                                                let input = raw_input
+                                                    .as_ref()
+                                                    .map(|v| {
+                                                        serde_json::to_string_pretty(v)
+                                                            .unwrap_or_default()
+                                                    })
+                                                    .unwrap_or_default();
+                                                let _ = tx.send(
+                                                    crate::agent::AgentEvent::ToolCallExecuting {
+                                                        id: tool_call_id.clone(),
+                                                        name: title.clone(),
+                                                        input,
+                                                    },
+                                                );
+                                            }
+                                            if status == crate::acp::ToolCallStatus::Completed
+                                                || status == crate::acp::ToolCallStatus::Failed
+                                            {
                                                 let output = content.as_ref().map(|c| {
                                                     c.iter().filter_map(|tc| {
                                                         if let crate::acp::ToolCallContent::Content { content } = tc {
@@ -134,15 +154,24 @@ pub async fn dispatch_acp_action(
                                                         None
                                                     }).collect::<Vec<_>>().join("\n")
                                                 }).unwrap_or_default();
-                                                let _ = tx.send(crate::agent::AgentEvent::ToolCallResult {
-                                                    id: tool_call_id,
-                                                    name: title,
-                                                    output,
-                                                    is_error: status == crate::acp::ToolCallStatus::Failed,
-                                                });
+                                                let _ = tx.send(
+                                                    crate::agent::AgentEvent::ToolCallResult {
+                                                        id: tool_call_id,
+                                                        name: title,
+                                                        output,
+                                                        is_error: status
+                                                            == crate::acp::ToolCallStatus::Failed,
+                                                    },
+                                                );
                                             }
                                         }
-                                        SessionUpdate::ToolCallUpdate { tool_call_id, title, status, content, .. } => {
+                                        SessionUpdate::ToolCallUpdate {
+                                            tool_call_id,
+                                            title,
+                                            status,
+                                            content,
+                                            ..
+                                        } => {
                                             if let Some(s) = status {
                                                 if s == crate::acp::ToolCallStatus::Completed
                                                     || s == crate::acp::ToolCallStatus::Failed
@@ -166,32 +195,42 @@ pub async fn dispatch_acp_action(
                                                 }
                                             }
                                         }
-                                                        SessionUpdate::Plan { entries } => {
-                                                            let todos: Vec<crate::agent::TodoItem> = entries.iter().map(|e| {
-                                                                crate::agent::TodoItem {
-                                                                    content: e.content.clone(),
-                                                                    status: match e.status {
-                                                                        crate::acp::PlanEntryStatus::Pending => crate::agent::TodoStatus::Pending,
-                                                                        crate::acp::PlanEntryStatus::InProgress => crate::agent::TodoStatus::InProgress,
-                                                                        crate::acp::PlanEntryStatus::Completed => crate::agent::TodoStatus::Completed,
-                                                                    },
-                                                                }
-                                                            }).collect();
-                                                            let _ = tx.send(crate::agent::AgentEvent::TodoUpdate(todos));
+                                        SessionUpdate::Plan { entries } => {
+                                            let todos: Vec<crate::agent::TodoItem> = entries
+                                                .iter()
+                                                .map(|e| crate::agent::TodoItem {
+                                                    content: e.content.clone(),
+                                                    status: match e.status {
+                                                        crate::acp::PlanEntryStatus::Pending => {
+                                                            crate::agent::TodoStatus::Pending
                                                         }
-                                                        SessionUpdate::CurrentModeUpdate { mode_id } => {
-                                                            let mut c = acp_clone.lock().await;
-                                                            c.set_current_mode(&mode_id);
+                                                        crate::acp::PlanEntryStatus::InProgress => {
+                                                            crate::agent::TodoStatus::InProgress
                                                         }
-                                                        SessionUpdate::ConfigOptionsUpdate { config_options } => {
-                                                            let mut c = acp_clone.lock().await;
-                                                            c.set_config_options(config_options);
+                                                        crate::acp::PlanEntryStatus::Completed => {
+                                                            crate::agent::TodoStatus::Completed
                                                         }
-                                                        _ => {}
+                                                    },
+                                                })
+                                                .collect();
+                                            let _ = tx
+                                                .send(crate::agent::AgentEvent::TodoUpdate(todos));
+                                        }
+                                        SessionUpdate::CurrentModeUpdate { mode_id } => {
+                                            let mut c = acp_clone.lock().await;
+                                            c.set_current_mode(&mode_id);
+                                        }
+                                        SessionUpdate::ConfigOptionsUpdate { config_options } => {
+                                            let mut c = acp_clone.lock().await;
+                                            c.set_config_options(config_options);
+                                        }
+                                        _ => {}
                                     }
                                 }
                                 crate::acp::AcpMessage::PromptComplete(_) => {
-                                    let _ = tx.send(crate::agent::AgentEvent::TextComplete(String::new()));
+                                    let _ = tx.send(crate::agent::AgentEvent::TextComplete(
+                                        String::new(),
+                                    ));
                                     let _ = tx.send(crate::agent::AgentEvent::Done {
                                         usage: crate::provider::Usage::default(),
                                     });
@@ -202,7 +241,13 @@ pub async fn dispatch_acp_action(
                                     if handle_acp_extension_method(&tx, &method, &params) {
                                         let _ = client.respond(id, serde_json::json!({})).await;
                                     } else {
-                                        handle_acp_incoming_request(&mut client, id, &method, params).await;
+                                        handle_acp_incoming_request(
+                                            &mut client,
+                                            id,
+                                            &method,
+                                            params,
+                                        )
+                                        .await;
                                     }
                                 }
                                 crate::acp::AcpMessage::Response { .. } => {}
@@ -249,8 +294,7 @@ pub async fn dispatch_acp_action(
                 .collect();
             drop(acp_lock);
             if entries.is_empty() {
-                app.status_message =
-                    Some(app::StatusMessage::info("no modes available"));
+                app.status_message = Some(app::StatusMessage::info("no modes available"));
             } else {
                 app.agent_selector.open(entries, &current);
             }
@@ -333,7 +377,11 @@ fn handle_acp_extension_method(
             let question = params["question"].as_str().unwrap_or("").to_string();
             let options: Vec<String> = params["options"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let (resp_tx, _) = tokio::sync::oneshot::channel();
             let _ = tx.send(crate::agent::AgentEvent::Question {
@@ -360,7 +408,9 @@ async fn handle_acp_incoming_request(
             let path = params["path"].as_str().unwrap_or("");
             match std::fs::read_to_string(path) {
                 Ok(content) => {
-                    let _ = client.respond(id, serde_json::json!({"content": content})).await;
+                    let _ = client
+                        .respond(id, serde_json::json!({"content": content}))
+                        .await;
                 }
                 Err(e) => {
                     let _ = client.respond_error(id, -32603, &e.to_string()).await;
@@ -383,7 +433,11 @@ async fn handle_acp_incoming_request(
             let command = params["command"].as_str().unwrap_or("sh");
             let args: Vec<String> = params["args"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let cwd = params["cwd"].as_str();
             let mut cmd = tokio::process::Command::new(command);
@@ -396,7 +450,9 @@ async fn handle_acp_incoming_request(
             match cmd.spawn() {
                 Ok(_child) => {
                     let tid = uuid::Uuid::new_v4().to_string();
-                    let _ = client.respond(id, serde_json::json!({"terminalId": tid})).await;
+                    let _ = client
+                        .respond(id, serde_json::json!({"terminalId": tid}))
+                        .await;
                 }
                 Err(e) => {
                     let _ = client.respond_error(id, -32603, &e.to_string()).await;
@@ -480,14 +536,34 @@ pub async fn dispatch_action(
                 } else {
                     Some(std::mem::take(&mut app.current_thinking))
                 };
+                let tool_calls = std::mem::take(&mut app.current_tool_calls);
+                let segments = std::mem::take(&mut app.streaming_segments);
                 app.messages.push(ChatMessage {
                     role: "assistant".to_string(),
-                    content,
-                    tool_calls: std::mem::take(&mut app.current_tool_calls),
-                    thinking,
+                    content: content.clone(),
+                    tool_calls: tool_calls.clone(),
+                    thinking: thinking.clone(),
                     model: Some(app.model_name.clone()),
-                    segments: Some(std::mem::take(&mut app.streaming_segments)),
+                    segments: Some(segments),
+                    chips: None,
                 });
+                let interrupted_tools: Vec<InterruptedToolCall> = tool_calls
+                    .into_iter()
+                    .map(|tc| InterruptedToolCall {
+                        name: tc.name,
+                        input: tc.input,
+                        output: tc.output,
+                        is_error: tc.is_error,
+                    })
+                    .collect();
+                if let Err(e) =
+                    agent
+                        .lock()
+                        .await
+                        .add_interrupted_message(content, interrupted_tools, thinking)
+                {
+                    tracing::warn!("Failed to persist interrupted message: {}", e);
+                }
             } else {
                 app.current_response.clear();
                 app.current_thinking.clear();
@@ -538,10 +614,33 @@ pub async fn dispatch_action(
         }
         InputAction::OpenModelSelector => {
             let agent_lock = agent.lock().await;
-            let grouped = agent_lock.fetch_all_models().await;
             let current_provider = agent_lock.current_provider_name().to_string();
             let current_model = agent_lock.current_model().to_string();
+
+            let grouped = if let Some(ref cached) = app.cached_model_groups {
+                cached.clone()
+            } else {
+                let cached = agent_lock.cached_all_models();
+                let has_all = cached.iter().all(|(_, models)| !models.is_empty());
+                if has_all {
+                    app.cached_model_groups = Some(cached.clone());
+                    cached
+                } else {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let agent_clone = Arc::clone(agent);
+                    tokio::spawn(async move {
+                        let mut lock = agent_clone.lock().await;
+                        let result = lock.fetch_all_models().await;
+                        let provider = lock.current_provider_name().to_string();
+                        let model = lock.current_model().to_string();
+                        let _ = tx.send((result, provider, model));
+                    });
+                    app.model_fetch_rx = Some(rx);
+                    cached
+                }
+            };
             drop(agent_lock);
+
             app.model_selector.favorites = app.favorite_models.clone();
             app.model_selector
                 .open(grouped, &current_provider, &current_model);
@@ -615,6 +714,7 @@ pub async fn dispatch_action(
                                     thinking: None,
                                     model,
                                     segments: None,
+                                    chips: None,
                                 });
                             }
                             app.scroll_to_bottom();
@@ -757,6 +857,7 @@ pub async fn dispatch_action(
                             thinking: None,
                             model,
                             segments: None,
+                            chips: None,
                         });
                     }
                     app.input = prompt;
@@ -779,6 +880,7 @@ pub async fn dispatch_action(
                 thinking: None,
                 model: None,
                 segments: None,
+                chips: None,
             });
             app.scroll_to_bottom();
         }
@@ -791,6 +893,7 @@ pub async fn dispatch_action(
                 thinking: None,
                 model: None,
                 segments: None,
+                chips: None,
             });
             app.scroll_to_bottom();
             let msg = format!("Load and use the {} skill", name);
@@ -813,6 +916,7 @@ pub async fn dispatch_action(
                 thinking: None,
                 model: None,
                 segments: None,
+                chips: None,
             });
             let agent_lock = agent.lock().await;
             match agent_lock.execute_command(&name, &args) {
@@ -824,6 +928,7 @@ pub async fn dispatch_action(
                         thinking: None,
                         model: None,
                         segments: None,
+                        chips: None,
                     });
                 }
                 Err(e) => {

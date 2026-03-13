@@ -301,7 +301,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 app.cursor_pos = target_offset;
                 InputAction::None
             } else if rect_contains(app.layout.messages, col, row) {
-                let content_y = app.layout.messages.y + 1;
+                let content_y = app.layout.messages.y;
                 if row >= content_y {
                     let content_row = row - content_y;
                     let visual_row = app.scroll_offset + content_row;
@@ -316,7 +316,9 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                         app.mark_dirty();
                         return InputAction::None;
                     }
-                    let content_col = col.saturating_sub(app.layout.messages.x);
+                    let content_col = col
+                        .saturating_sub(app.layout.messages.x)
+                        .min(app.content_width.saturating_sub(1));
                     app.selection.start(content_col, visual_row);
                 }
                 if app.vim_mode && app.mode == AppMode::Insert && app.input.is_empty() {
@@ -329,9 +331,11 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
         }
         MouseEventKind::Drag(MouseButton::Left) => {
             if app.selection.active {
-                let content_y = app.layout.messages.y + 1;
-                let content_height = app.layout.messages.height.saturating_sub(1);
-                let content_col = col.saturating_sub(app.layout.messages.x);
+                let content_y = app.layout.messages.y;
+                let content_height = app.layout.messages.height;
+                let content_col = col
+                    .saturating_sub(app.layout.messages.x)
+                    .min(app.content_width.saturating_sub(1));
                 let content_row = if row >= content_y {
                     (row - content_y).min(content_height.saturating_sub(1))
                 } else {
@@ -344,9 +348,11 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
         }
         MouseEventKind::Up(MouseButton::Left) => {
             if app.selection.active {
-                let content_y = app.layout.messages.y + 1;
-                let content_height = app.layout.messages.height.saturating_sub(1);
-                let content_col = col.saturating_sub(app.layout.messages.x);
+                let content_y = app.layout.messages.y;
+                let content_height = app.layout.messages.height;
+                let content_col = col
+                    .saturating_sub(app.layout.messages.x)
+                    .min(app.content_width.saturating_sub(1));
                 let content_row = if row >= content_y {
                     (row - content_y).min(content_height.saturating_sub(1))
                 } else {
@@ -478,7 +484,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 return InputAction::None;
             }
             if rect_contains(app.layout.messages, col, row) && !app.is_streaming {
-                let content_y = app.layout.messages.y + 1;
+                let content_y = app.layout.messages.y;
                 if row >= content_y {
                     let visual_row = (app.scroll_offset + (row - content_y)) as usize;
                     if let Some(&msg_idx) = app.message_line_map.get(visual_row) {

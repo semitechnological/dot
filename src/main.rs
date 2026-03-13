@@ -5,16 +5,30 @@ use clap::Parser;
 use dot::auth::ProviderCredential;
 use tracing_subscriber::EnvFilter;
 
+fn init_tracing(tui_mode: bool) {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    if tui_mode {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .with_writer(std::io::sink)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .init();
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install().map_err(|e| anyhow!("{e}"))?;
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_target(false)
-        .init();
-
     let cli = dot::cli::Cli::parse();
+    let tui_mode =
+        cli.command.is_none() || matches!(cli.command, Some(dot::cli::Commands::Acp { .. }));
+    init_tracing(tui_mode);
 
     if cli.print_version {
         println!("dot {}", env!("CARGO_PKG_VERSION"));

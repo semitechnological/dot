@@ -188,6 +188,7 @@ async fn run_app(
                     thinking: None,
                     model,
                     segments: None,
+                    chips: None,
                 });
             }
             if !conv.messages.is_empty() {
@@ -202,6 +203,19 @@ async fn run_app(
             app.scroll_to_bottom();
         }
         drop(agent_lock);
+    }
+
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let agent_clone = Arc::clone(&agent);
+        tokio::spawn(async move {
+            let mut lock = agent_clone.lock().await;
+            let result = lock.fetch_all_models().await;
+            let provider = lock.current_provider_name().to_string();
+            let model = lock.current_model().to_string();
+            let _ = tx.send((result, provider, model));
+        });
+        app.model_fetch_rx = Some(rx);
     }
 
     let mut events = EventHandler::new();
@@ -367,6 +381,22 @@ async fn handle_event(
                 app.status_message = None;
                 app.mark_dirty();
             }
+            if let Some(mut rx) = app.model_fetch_rx.take() {
+                match rx.try_recv() {
+                    Ok((grouped, provider, model)) => {
+                        app.cached_model_groups = Some(grouped.clone());
+                        if app.model_selector.visible {
+                            app.model_selector.favorites = app.favorite_models.clone();
+                            app.model_selector.open(grouped, &provider, &model);
+                        }
+                        app.mark_dirty();
+                    }
+                    Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                        app.model_fetch_rx = Some(rx);
+                    }
+                    Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {}
+                }
+            }
             return actions::LoopSignal::Continue;
         }
         AppEvent::Agent(ev) => {
@@ -394,10 +424,7 @@ pub async fn run_acp(config: crate::config::Config, client: crate::acp::AcpClien
         .agent_info()
         .map(|i| i.name.clone())
         .unwrap_or_else(|| "acp".into());
-    let model_name = client
-        .current_mode()
-        .unwrap_or("acp")
-        .to_string();
+    let model_name = client.current_mode().unwrap_or("acp").to_string();
     let provider_name = agent_name.clone();
 
     let mut app = app::App::new(

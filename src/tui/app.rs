@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::time::Instant;
 
@@ -21,6 +21,8 @@ pub struct ChatMessage {
     pub model: Option<String>,
     /// Interleaved text and tool calls in display order. When Some, used for rendering; when None, fall back to content + tool_calls.
     pub segments: Option<Vec<StreamSegment>>,
+    /// Chip ranges for user messages: @file and /skill mentions. Byte offsets into content.
+    pub chips: Option<Vec<InputChip>>,
 }
 
 pub struct TokenUsage {
@@ -326,6 +328,12 @@ pub struct App {
 
     pub render_dirty: bool,
     pub render_cache: Option<RenderCache>,
+    pub tool_call_complete_ticks: HashMap<(usize, usize), u64>,
+    pub input_at_top: bool,
+
+    pub cached_model_groups: Option<Vec<(String, Vec<String>)>>,
+    pub model_fetch_rx:
+        Option<tokio::sync::oneshot::Receiver<(Vec<(String, Vec<String>)>, String, String)>>,
 }
 impl App {
     pub fn new(
@@ -401,6 +409,10 @@ impl App {
             background_subagents: Vec::new(),
             render_dirty: true,
             render_cache: None,
+            tool_call_complete_ticks: HashMap::new(),
+            input_at_top: false,
+            cached_model_groups: None,
+            model_fetch_rx: None,
         }
     }
 
@@ -464,7 +476,9 @@ impl App {
                         thinking,
                         model: Some(self.model_name.clone()),
                         segments: Some(std::mem::take(&mut self.streaming_segments)),
+                        chips: None,
                     });
+                    self.mark_dirty();
                 }
                 self.current_response.clear();
                 self.current_thinking.clear();
@@ -533,6 +547,7 @@ impl App {
                     thinking: None,
                     model: None,
                     segments: None,
+                    chips: None,
                 });
             }
             AgentEvent::TitleGenerated(title) => {
@@ -698,6 +713,7 @@ impl App {
                 format!("{} [{}]", trimmed, att_names.join(", "))
             }
         };
+        let chips = std::mem::take(&mut self.chips);
         self.messages.push(ChatMessage {
             role: "user".to_string(),
             content: display,
@@ -705,11 +721,11 @@ impl App {
             thinking: None,
             model: None,
             segments: None,
+            chips: if chips.is_empty() { None } else { Some(chips) },
         });
         self.input.clear();
         self.cursor_pos = 0;
         self.paste_blocks.clear();
-        self.chips.clear();
         self.history.push(trimmed.clone());
         self.history_index = None;
         self.history_draft.clear();
@@ -753,6 +769,7 @@ impl App {
                 format!("{} [{}]", trimmed, names.join(", "))
             }
         };
+        let chips = std::mem::take(&mut self.chips);
         self.messages.push(ChatMessage {
             role: "user".to_string(),
             content: display,
@@ -760,6 +777,7 @@ impl App {
             thinking: None,
             model: None,
             segments: None,
+            chips: if chips.is_empty() { None } else { Some(chips) },
         });
         let images: Vec<(String, String)> = self
             .attachments
@@ -776,7 +794,6 @@ impl App {
         self.input.clear();
         self.cursor_pos = 0;
         self.paste_blocks.clear();
-        self.chips.clear();
         self.scroll_to_bottom();
         self.mark_dirty();
         true
@@ -784,15 +801,15 @@ impl App {
 
     pub fn input_height(&self, width: u16) -> u16 {
         if self.is_streaming && self.input.is_empty() && self.attachments.is_empty() {
-            return 3;
+            return 1;
         }
         let w = width as usize;
         if w < 4 {
-            return 3;
+            return 1;
         }
         let has_input = !self.input.is_empty() || !self.attachments.is_empty();
         if !has_input {
-            return 3;
+            return 1;
         }
         let mut visual = 0usize;
         if !self.attachments.is_empty() {
@@ -813,7 +830,7 @@ impl App {
                 };
             }
         }
-        (visual as u16 + 1).clamp(3, 12)
+        (visual as u16).max(1).min(12)
     }
 
     pub fn handle_paste(&mut self, text: String) {
@@ -986,6 +1003,7 @@ impl App {
         self.background_subagents.clear();
         self.message_queue.clear();
         self.render_cache = None;
+        self.tool_call_complete_ticks.clear();
         self.mark_dirty();
     }
 

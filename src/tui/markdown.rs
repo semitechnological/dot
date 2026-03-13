@@ -171,7 +171,7 @@ pub fn render_markdown(text: &str, theme: &Theme, width: u16) -> Vec<Line<'stati
             )));
         } else if let Some(quote) = raw_line.strip_prefix("> ") {
             lines.push(Line::from(vec![
-                Span::styled("  │ ", theme.blockquote),
+                Span::styled("  │ ", theme.border),
                 Span::styled(quote.to_string(), theme.blockquote),
             ]));
         } else if raw_line.starts_with("- ") || raw_line.starts_with("* ") {
@@ -259,54 +259,36 @@ pub fn render_code_block(
     output: &mut Vec<Line<'static>>,
 ) {
     let w = width as usize;
-    let bg = theme.code_bg;
-    let pad = " ";
-    let pad_len = 1;
 
     output.push(Line::from(""));
 
-    let fill = |content_len: usize| -> String { " ".repeat(w.saturating_sub(content_len)) };
-
-    // Top line: language badge or blank, all on code_bg
     if !lang.is_empty() {
-        let badge = format!("{}{}", pad, lang);
-        let badge_len = badge.chars().count();
         output.push(Line::from(vec![
-            Span::styled(badge, Style::default().fg(theme.muted_fg).bg(bg)),
-            Span::styled(fill(badge_len), Style::default().bg(bg)),
+            Span::styled(" │ ", theme.border),
+            Span::styled(lang.to_string(), Style::default().fg(theme.muted_fg)),
         ]));
-    } else {
-        output.push(Line::from(Span::styled(
-            " ".repeat(w),
-            Style::default().bg(bg),
-        )));
     }
 
     let is_diff = lang == "diff" || lang == "patch";
     if is_diff {
         for raw_line in code_lines {
-            let line = &truncate_code_line(raw_line, w.saturating_sub(pad_len));
+            let line = &truncate_code_line(raw_line, w.saturating_sub(3));
             let diff_style = if line.starts_with('+') {
-                theme.diff_add.bg(bg)
+                theme.diff_add
             } else if line.starts_with('-') {
-                theme.diff_remove.bg(bg)
+                theme.diff_remove
             } else if line.starts_with('@') {
-                theme.diff_hunk.bg(bg)
+                theme.diff_hunk
             } else {
-                Style::default().fg(theme.fg).bg(bg)
+                Style::default().fg(theme.fg)
             };
-            let content = format!("{}{}", pad, line);
-            let content_len = content.chars().count();
             output.push(Line::from(vec![
-                Span::styled(content, diff_style),
-                Span::styled(fill(content_len), Style::default().bg(bg)),
+                Span::styled(" │ ", theme.border),
+                Span::styled(line.to_string(), diff_style),
             ]));
         }
         if code_lines.is_empty() {
-            output.push(Line::from(Span::styled(
-                " ".repeat(w),
-                Style::default().bg(bg),
-            )));
+            output.push(Line::from(Span::styled(" │", theme.border)));
         }
     } else if let Some(syntect_theme_name) = theme.syntect_theme
         && !lang.is_empty()
@@ -315,42 +297,34 @@ pub fn render_code_block(
     {
         let mut highlighter = syntect::easy::HighlightLines::new(syntax, st_theme);
         for raw_line in code_lines {
-            let line: &str = &truncate_code_line(raw_line, w.saturating_sub(pad_len));
+            let line: &str = &truncate_code_line(raw_line, w.saturating_sub(3));
             let highlighted = highlighter.highlight_line(line, &SYNTAX_SET);
             match highlighted {
                 Ok(ranges) => {
-                    let mut spans = vec![Span::styled(pad, Style::default().bg(bg))];
-                    let mut content_len = pad_len;
+                    let mut spans = vec![Span::styled(" │ ", theme.border)];
                     for (style, text) in ranges {
                         let fg = style.foreground;
                         let clean = text.trim_end_matches('\n');
                         if clean.is_empty() {
                             continue;
                         }
-                        content_len += clean.chars().count();
                         spans.push(Span::styled(
                             clean.to_string(),
-                            Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b)).bg(bg),
+                            Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b)),
                         ));
                     }
-                    spans.push(Span::styled(fill(content_len), Style::default().bg(bg)));
                     output.push(Line::from(spans));
                 }
                 Err(_) => {
-                    let content = format!("{}{}", pad, line);
-                    let content_len = content.chars().count();
                     output.push(Line::from(vec![
-                        Span::styled(content, Style::default().fg(theme.fg).bg(bg)),
-                        Span::styled(fill(content_len), Style::default().bg(bg)),
+                        Span::styled(" │ ", theme.border),
+                        Span::styled(line.to_string(), Style::default().fg(theme.fg)),
                     ]));
                 }
             }
         }
         if code_lines.is_empty() {
-            output.push(Line::from(Span::styled(
-                " ".repeat(w),
-                Style::default().bg(bg),
-            )));
+            output.push(Line::from(Span::styled(" │", theme.border)));
         }
     } else if let Some(styles) = &theme.syntax
         && !lang.is_empty()
@@ -359,20 +333,18 @@ pub fn render_code_block(
         let mut state = ParseState::new(syntax);
         let mut stack = ScopeStack::new();
         for raw_line in code_lines {
-            let line = &truncate_code_line(raw_line, w.saturating_sub(pad_len));
+            let line = &truncate_code_line(raw_line, w.saturating_sub(3));
             match state.parse_line(line, &SYNTAX_SET) {
                 Ok(ops) => {
-                    let mut spans = vec![Span::styled(pad, Style::default().bg(bg))];
-                    let mut content_len = pad_len;
+                    let mut spans = vec![Span::styled(" │ ", theme.border)];
                     let mut prev = 0;
                     for (pos, op) in &ops {
                         let pos = (*pos).min(line.len());
                         if pos > prev {
                             let text = &line[prev..pos];
-                            content_len += text.chars().count();
                             spans.push(Span::styled(
                                 text.to_string(),
-                                resolve_scope(&stack, styles).bg(bg),
+                                resolve_scope(&stack, styles),
                             ));
                         }
                         let _ = stack.apply(op);
@@ -380,47 +352,34 @@ pub fn render_code_block(
                     }
                     if prev < line.len() {
                         let text = &line[prev..];
-                        content_len += text.chars().count();
                         spans.push(Span::styled(
                             text.to_string(),
-                            resolve_scope(&stack, styles).bg(bg),
+                            resolve_scope(&stack, styles),
                         ));
                     }
-                    spans.push(Span::styled(fill(content_len), Style::default().bg(bg)));
                     output.push(Line::from(spans));
                 }
                 Err(_) => {
-                    let content = format!("{}{}", pad, line);
-                    let content_len = content.chars().count();
                     output.push(Line::from(vec![
-                        Span::styled(content, Style::default().fg(theme.fg).bg(bg)),
-                        Span::styled(fill(content_len), Style::default().bg(bg)),
+                        Span::styled(" │ ", theme.border),
+                        Span::styled(line.to_string(), Style::default().fg(theme.fg)),
                     ]));
                 }
             }
         }
         if code_lines.is_empty() {
-            output.push(Line::from(Span::styled(
-                " ".repeat(w),
-                Style::default().bg(bg),
-            )));
+            output.push(Line::from(Span::styled(" │", theme.border)));
         }
     } else {
-        let code_style = Style::default().fg(theme.fg).bg(bg);
         for raw_line in code_lines {
-            let line = &truncate_code_line(raw_line, w.saturating_sub(pad_len));
-            let content = format!("{}{}", pad, line);
-            let content_len = content.chars().count();
+            let line = &truncate_code_line(raw_line, w.saturating_sub(3));
             output.push(Line::from(vec![
-                Span::styled(content, code_style),
-                Span::styled(fill(content_len), Style::default().bg(bg)),
+                Span::styled(" │ ", theme.border),
+                Span::styled(line.to_string(), Style::default().fg(theme.fg)),
             ]));
         }
         if code_lines.is_empty() {
-            output.push(Line::from(Span::styled(
-                " ".repeat(w),
-                Style::default().bg(bg),
-            )));
+            output.push(Line::from(Span::styled(" │", theme.border)));
         }
     }
 

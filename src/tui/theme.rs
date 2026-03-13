@@ -100,6 +100,13 @@ pub struct Theme {
     pub diff_add: Style,
     pub diff_remove: Style,
     pub diff_hunk: Style,
+    pub input_bg: Color,
+    pub input_fg: Color,
+    pub input_dim_fg: Color,
+    pub progress_bar_filled: Style,
+    pub progress_bar_empty: Style,
+    pub streaming_dot: Style,
+    pub user_text_bg: Color,
 }
 
 impl Theme {
@@ -117,15 +124,15 @@ impl Theme {
 
     pub fn dark() -> Self {
         let muted = Color::Rgb(88, 91, 112);
-        let surface = Color::Rgb(49, 50, 68);
-        let accent = Color::Rgb(137, 180, 250);
-        let green = Color::Rgb(166, 227, 161);
-        let peach = Color::Rgb(250, 179, 135);
-        let red = Color::Rgb(243, 139, 168);
-        let mauve = Color::Rgb(203, 166, 247);
-        let yellow = Color::Rgb(249, 226, 175);
-        let teal = Color::Rgb(148, 226, 213);
-        let sapphire = Color::Rgb(116, 199, 236);
+        let surface = Color::Rgb(42, 44, 60);
+        let accent = Color::Rgb(110, 150, 215);
+        let green = Color::Rgb(140, 190, 135);
+        let peach = Color::Rgb(210, 155, 115);
+        let red = Color::Rgb(200, 120, 145);
+        let mauve = Color::Rgb(170, 140, 210);
+        let yellow = Color::Rgb(210, 190, 150);
+        let teal = Color::Rgb(120, 185, 175);
+        let sapphire = Color::Rgb(95, 165, 200);
         let base = Color::Rgb(30, 30, 46);
 
         Self {
@@ -172,10 +179,10 @@ impl Theme {
             mode_normal_bg: muted,
             mode_insert_fg: base,
             mode_insert_bg: accent,
-            cost: Style::default().fg(Color::Rgb(180, 150, 90)),
+            cost: Style::default().fg(Color::Rgb(165, 135, 80)),
             user_text: Style::default().fg(Color::Rgb(205, 214, 244)),
             tool_action: Style::default().fg(muted),
-            separator: Style::default().fg(Color::Rgb(60, 62, 80)),
+            separator: Style::default().fg(Color::Rgb(52, 54, 72)),
             tool_exit_ok: Style::default().fg(green),
             tool_exit_err: Style::default().fg(red),
             syntax: None,
@@ -183,20 +190,27 @@ impl Theme {
             diff_add: Style::default().fg(green),
             diff_remove: Style::default().fg(red),
             diff_hunk: Style::default().fg(accent),
+            input_bg: Color::Rgb(36, 38, 55),
+            input_fg: Color::White,
+            input_dim_fg: muted,
+            progress_bar_filled: Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            progress_bar_empty: Style::default().fg(surface),
+            streaming_dot: Style::default().fg(accent),
+            user_text_bg: Color::Rgb(38, 40, 58),
         }
     }
 
     pub fn light() -> Self {
         let muted = Color::Rgb(140, 143, 161);
         let surface = Color::Rgb(204, 208, 218);
-        let accent = Color::Rgb(30, 102, 245);
-        let green = Color::Rgb(64, 160, 43);
-        let peach = Color::Rgb(254, 100, 11);
-        let red = Color::Rgb(210, 15, 57);
-        let mauve = Color::Rgb(136, 57, 239);
-        let yellow = Color::Rgb(223, 142, 29);
-        let teal = Color::Rgb(23, 146, 153);
-        let sapphire = Color::Rgb(32, 159, 181);
+        let accent = Color::Rgb(35, 90, 210);
+        let green = Color::Rgb(55, 135, 40);
+        let peach = Color::Rgb(210, 90, 20);
+        let red = Color::Rgb(175, 30, 60);
+        let mauve = Color::Rgb(110, 55, 190);
+        let yellow = Color::Rgb(185, 120, 30);
+        let teal = Color::Rgb(25, 125, 130);
+        let sapphire = Color::Rgb(30, 130, 155);
         let text = Color::Rgb(76, 79, 105);
 
         Self {
@@ -241,7 +255,7 @@ impl Theme {
             mode_normal_bg: muted,
             mode_insert_fg: Color::White,
             mode_insert_bg: accent,
-            cost: Style::default().fg(Color::Rgb(160, 120, 40)),
+            cost: Style::default().fg(Color::Rgb(150, 110, 35)),
             user_text: Style::default().fg(text),
             tool_action: Style::default().fg(muted),
             separator: Style::default().fg(surface),
@@ -252,83 +266,88 @@ impl Theme {
             diff_add: Style::default().fg(green),
             diff_remove: Style::default().fg(red),
             diff_hunk: Style::default().fg(accent),
+            input_bg: Color::Rgb(210, 214, 225),
+            input_fg: text,
+            input_dim_fg: muted,
+            progress_bar_filled: Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            progress_bar_empty: Style::default().fg(surface),
+            streaming_dot: Style::default().fg(accent),
+            user_text_bg: Color::Rgb(218, 222, 232),
         }
     }
 
     pub fn terminal() -> Self {
-        let red = Color::Indexed(1);
-        let green = Color::Indexed(2);
-        let yellow = Color::Indexed(3);
-        let magenta = Color::Indexed(5);
-        let cyan = Color::Indexed(6);
-        let bright_black = Color::Indexed(8);
-
-        let fg = Color::Reset;
-        let dim = Style::default().fg(bright_black);
+        let dim = Style::default().add_modifier(Modifier::DIM);
         let bold = Style::default().add_modifier(Modifier::BOLD);
+        let muted = Color::Indexed(8);
 
         Self {
             bg: Color::Reset,
-            fg,
+            fg: Color::Reset,
             dim,
-            accent: fg,
-            muted_fg: bright_black,
-            user_label: Style::default().fg(magenta).add_modifier(Modifier::BOLD),
-            assistant_label: bold,
+            accent: Color::Reset,
+            muted_fg: muted,
+            user_label: bold,
+            assistant_label: Style::default(),
             border: dim,
             input_prompt: bold,
             status_bar: dim,
             code_bg: Color::Indexed(0),
-            inline_code: Style::default().fg(yellow),
-            error: Style::default().fg(red),
-            tool_name: Style::default().add_modifier(Modifier::BOLD),
+            inline_code: Style::default().fg(muted),
+            error: Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED),
+            tool_name: bold,
             tool_output: dim,
-            tool_success: Style::default().fg(green),
+            tool_success: bold,
             heading: Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             bold,
             italic: Style::default().add_modifier(Modifier::ITALIC),
             blockquote: dim,
-            link: Style::default().fg(cyan).add_modifier(Modifier::UNDERLINED),
+            link: Style::default().add_modifier(Modifier::UNDERLINED),
             list_bullet: dim,
             scrollbar_track: dim,
-            scrollbar_thumb: Style::default().fg(fg),
+            scrollbar_thumb: Style::default(),
             highlight: Style::default().add_modifier(Modifier::REVERSED),
-            tool_file_read: Style::default().fg(cyan),
-            tool_file_write: Style::default().fg(yellow),
+            tool_file_read: Style::default().fg(muted),
+            tool_file_write: Style::default().fg(muted),
             tool_directory: bold,
-            tool_search: Style::default().fg(magenta),
-            tool_command: Style::default().fg(green),
-            tool_mcp: Style::default().fg(cyan),
-            tool_skill: Style::default().fg(magenta),
-            tool_badge_bg: bright_black,
+            tool_search: Style::default().fg(muted),
+            tool_command: Style::default().fg(muted),
+            tool_mcp: Style::default().fg(muted),
+            tool_skill: Style::default().fg(muted),
+            tool_badge_bg: muted,
             tool_path: Style::default().add_modifier(Modifier::UNDERLINED),
             thinking: dim,
             mode_normal_fg: Color::Reset,
-            mode_normal_bg: bright_black,
+            mode_normal_bg: muted,
             mode_insert_fg: Color::Indexed(0),
             mode_insert_bg: Color::Reset,
             cost: dim,
-            user_text: Style::default(),
+            user_text: bold,
             tool_action: dim,
             separator: dim,
-            tool_exit_ok: Style::default().fg(green),
-            tool_exit_err: Style::default().fg(red),
+            tool_exit_ok: bold,
+            tool_exit_err: Style::default().add_modifier(Modifier::BOLD),
             syntax: Some(SyntaxStyles {
-                keyword: Style::default().fg(magenta),
-                string: Style::default().fg(green),
-                comment: Style::default()
-                    .fg(bright_black)
-                    .add_modifier(Modifier::ITALIC),
-                function: Style::default().fg(yellow),
-                type_name: Style::default().fg(cyan),
-                number: Style::default().fg(cyan),
-                constant: Style::default().fg(red),
-                attribute: Style::default().fg(yellow),
+                keyword: bold,
+                string: Style::default().fg(muted),
+                comment: dim.add_modifier(Modifier::ITALIC),
+                function: bold,
+                type_name: Style::default().fg(muted),
+                number: Style::default().fg(muted),
+                constant: bold,
+                attribute: Style::default().fg(muted),
             }),
             syntect_theme: None,
-            diff_add: Style::default().fg(green),
-            diff_remove: Style::default().fg(red),
-            diff_hunk: Style::default().fg(cyan),
+            diff_add: bold,
+            diff_remove: dim,
+            diff_hunk: Style::default().fg(muted),
+            input_bg: muted,
+            input_fg: Color::Reset,
+            input_dim_fg: muted,
+            progress_bar_filled: bold,
+            progress_bar_empty: dim,
+            streaming_dot: dim,
+            user_text_bg: Color::Indexed(0),
         }
     }
 }

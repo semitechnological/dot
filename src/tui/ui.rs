@@ -181,7 +181,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                 &MessageRenderCtx {
                     theme: &app.theme,
                     thinking_expanded: app.thinking_expanded,
-                    inner_width: inner.width,
+                    inner_width: wrap_width,
                     expanded_tool_calls: &app.expanded_tool_calls,
                 },
                 &mut all_lines,
@@ -386,6 +386,8 @@ fn render_message(
         "user" => {
             let w = ctx.inner_width as usize;
             let right_pad = 2usize;
+            let left_indent = body_indent_cols as usize;
+            let content_width = w.saturating_sub(left_indent + right_pad);
             let user_style = ctx.theme.user_text.add_modifier(Modifier::BOLD);
             let chip_style = ctx.theme.dim;
             let chips: Vec<InputChip> = msg
@@ -395,19 +397,26 @@ fn render_message(
             let line_count = msg.content.lines().count();
             let mut byte_offset = 0;
             for (i, text_line) in msg.content.lines().enumerate() {
-                line_to_tool.push(None);
-                let chars = text_line.chars().count();
-                let left = w.saturating_sub(chars + right_pad);
                 let line_spans =
                     chip_styled_spans(text_line, byte_offset, &chips, chip_style, Some(user_style));
                 byte_offset += text_line.len();
                 if i < line_count - 1 {
                     byte_offset += 1;
                 }
-                let mut line_vec = vec![Span::raw(" ".repeat(left))];
-                line_vec.extend(line_spans);
-                line_vec.push(Span::raw(" ".repeat(right_pad)));
-                lines.push(Line::from(line_vec));
+                let content_line = Line::from(line_spans.clone());
+                let wrapped = char_wrap(vec![content_line], content_width as u16);
+                for row in wrapped {
+                    line_to_tool.push(None);
+                    let row_chars: usize = row.spans.iter().map(|s| s.content.chars().count()).sum();
+                    let left = w.saturating_sub(left_indent + row_chars + right_pad);
+                    let mut line_vec = vec![
+                        Span::raw(body_indent),
+                        Span::raw(" ".repeat(left)),
+                    ];
+                    line_vec.extend(row.spans);
+                    line_vec.push(Span::raw(" ".repeat(right_pad)));
+                    lines.push(Line::from(line_vec));
+                }
             }
             if line_count > 1 {
                 lines.push(Line::from(""));
@@ -747,10 +756,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         left_spans.extend(right_spans);
         vec![Line::from(left_spans)]
     } else if !has_input {
-        vec![Line::from(vec![
-            Span::styled(prompt, prompt_style),
-            Span::styled("type @ to mention files, / for commands", app.theme.dim),
-        ])]
+        vec![Line::from(vec![Span::styled(prompt, prompt_style)])]
     } else {
         let mut lines = Vec::new();
         if !app.attachments.is_empty() {
@@ -1157,18 +1163,15 @@ fn expand_line_to_tool(
     let mut result = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let tool = line_to_tool.get(i).copied().flatten();
-        if width == 0 {
-            result.push(tool);
+        let wrapped = if width < 1 {
+            1
         } else {
-            let w = line.width();
-            let wrapped = if w == 0 {
-                1
-            } else {
-                (w as u32).div_ceil(width as u32).max(1)
-            };
-            for j in 0..wrapped {
-                result.push(if j == 0 { tool } else { None });
-            }
+            Paragraph::new(vec![line.clone()])
+                .wrap(Wrap { trim: false })
+                .line_count(width)
+        };
+        for _ in 0..wrapped {
+            result.push(tool);
         }
     }
     result

@@ -2,6 +2,7 @@ mod modes;
 mod mouse;
 mod popups;
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -9,6 +10,17 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::tui::app::{App, AppMode};
 
 pub use mouse::handle_mouse;
+
+fn path_exists(path: &str) -> bool {
+    let resolved = if path.starts_with('~') {
+        std::env::var("HOME")
+            .map(|h| path.replacen('~', &h, 1))
+            .unwrap_or_else(|_| path.to_string())
+    } else {
+        path.to_string()
+    };
+    Path::new(&resolved).exists()
+}
 
 pub enum InputAction {
     AnswerQuestion(String),
@@ -46,26 +58,61 @@ pub enum InputAction {
     OpenExternalEditor,
 }
 
+enum PasteItem {
+    Path(String),
+    Plain(String),
+}
+
 pub fn handle_paste(app: &mut App, text: String) -> InputAction {
     if app.vim_mode && app.mode != AppMode::Insert {
         return InputAction::None;
     }
 
-    let trimmed = text.trim_end_matches('\n').to_string();
+    let trimmed = text.trim_end_matches('\n');
     if trimmed.is_empty() {
         return InputAction::None;
     }
 
-    if crate::tui::app::is_image_path(trimmed.trim()) {
-        let path = trimmed.trim().trim_matches('"').trim_matches('\'');
-        match app.add_image_attachment(path) {
-            Ok(()) => {}
-            Err(e) => app.status_message = Some(crate::tui::app::StatusMessage::error(e)),
+    let lines: Vec<&str> = trimmed
+        .split('\n')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let mut items: Vec<PasteItem> = Vec::new();
+    for line in &lines {
+        if let Some(path) = crate::tui::app::normalize_paste_path(line) {
+            if path_exists(&path) {
+                items.push(PasteItem::Path(path));
+                continue;
+            }
         }
-        return InputAction::None;
+        items.push(PasteItem::Plain((*line).to_string()));
     }
 
-    app.handle_paste(trimmed);
+    let mut plain_buf: Vec<String> = Vec::new();
+    for item in items {
+        match item {
+            PasteItem::Path(path) => {
+                if !plain_buf.is_empty() {
+                    app.handle_paste(plain_buf.join("\n"));
+                    plain_buf.clear();
+                }
+                if crate::tui::app::is_image_path(&path) {
+                    if let Err(e) = app.add_image_attachment(&path) {
+                        app.status_message = Some(crate::tui::app::StatusMessage::error(e));
+                    }
+                } else {
+                    app.insert_file_reference(&path);
+                }
+            }
+            PasteItem::Plain(s) => plain_buf.push(s),
+        }
+    }
+    if !plain_buf.is_empty() {
+        app.handle_paste(plain_buf.join("\n"));
+    }
+
     InputAction::None
 }
 

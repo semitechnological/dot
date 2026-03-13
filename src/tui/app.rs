@@ -181,6 +181,28 @@ pub fn is_image_path(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Normalizes pasted text that may be a file path or file:// URL into a path string.
+/// Returns None if the input does not look like a valid path.
+pub fn normalize_paste_path(s: &str) -> Option<String> {
+    let s = s.trim().trim_matches('"').trim_matches('\'');
+    if s.is_empty() {
+        return None;
+    }
+    if let Ok(u) = url::Url::parse(s) {
+        if u.scheme() == "file" {
+            let path = u.path();
+            if path.is_empty() || path == "/" {
+                return None;
+            }
+            return Some(path.to_string());
+        }
+    }
+    if s.starts_with('/') || s.starts_with('~') || s.starts_with("./") {
+        return Some(s.to_string());
+    }
+    None
+}
+
 pub const PASTE_COLLAPSE_THRESHOLD: usize = 5;
 
 #[derive(Debug)]
@@ -433,9 +455,11 @@ impl App {
         match event {
             AgentEvent::TextDelta(text) => {
                 self.current_response.push_str(&text);
+                self.mark_dirty();
             }
             AgentEvent::ThinkingDelta(text) => {
                 self.current_thinking.push_str(&text);
+                self.mark_dirty();
             }
             AgentEvent::TextComplete(text) => {
                 if !text.is_empty()
@@ -490,13 +514,16 @@ impl App {
             AgentEvent::ToolCallStart { name, .. } => {
                 self.pending_tool_name = Some(name);
                 self.pending_tool_input.clear();
+                self.mark_dirty();
             }
             AgentEvent::ToolCallInputDelta(delta) => {
                 self.pending_tool_input.push_str(&delta);
+                self.mark_dirty();
             }
             AgentEvent::ToolCallExecuting { name, input, .. } => {
                 self.pending_tool_name = Some(name.clone());
                 self.pending_tool_input = input;
+                self.mark_dirty();
             }
             AgentEvent::ToolCallResult {
                 name,
@@ -525,6 +552,7 @@ impl App {
                 self.streaming_segments
                     .push(StreamSegment::ToolCall(display));
                 self.pending_tool_name = None;
+                self.mark_dirty();
             }
             AgentEvent::Done { usage } => {
                 self.is_streaming = false;
@@ -928,6 +956,21 @@ impl App {
             data: encoded,
         });
         Ok(())
+    }
+
+    pub fn insert_file_reference(&mut self, path: &str) {
+        let text = format!("@{} ", path);
+        let start = self.cursor_pos;
+        let len = text.len();
+        self.input.insert_str(start, &text);
+        self.adjust_chips(start, 0, len);
+        let chip_end = start + 1 + path.len();
+        self.chips.push(InputChip {
+            start,
+            end: chip_end,
+            kind: ChipKind::File,
+        });
+        self.cursor_pos = start + len;
     }
 
     pub fn display_input(&self) -> String {

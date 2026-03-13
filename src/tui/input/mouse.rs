@@ -10,6 +10,13 @@ fn rect_contains(r: ratatui::layout::Rect, col: u16, row: u16) -> bool {
     col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
 }
 
+fn try_tool_at_row(app: &crate::tui::app::App, visual_row: u16) -> Option<(usize, usize)> {
+    app.tool_line_map
+        .get(visual_row as usize)
+        .copied()
+        .flatten()
+}
+
 fn compute_click_cursor_pos(input: &str, target_col: usize, target_row: usize) -> usize {
     let mut row: usize = 0;
     let mut col: usize = 0;
@@ -305,21 +312,15 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 if row >= content_y {
                     let content_row = row - content_y;
                     let visual_row = app.scroll_offset + content_row;
-                    if let Some(Some((msg_idx, tool_idx))) =
-                        app.tool_line_map.get(visual_row as usize).copied()
-                    {
-                        if app.expanded_tool_calls.contains(&(msg_idx, tool_idx)) {
-                            app.expanded_tool_calls.remove(&(msg_idx, tool_idx));
-                        } else {
-                            app.expanded_tool_calls.insert((msg_idx, tool_idx));
-                        }
-                        app.mark_dirty();
-                        return InputAction::None;
+                    let on_tool = try_tool_at_row(app, visual_row)
+                        .or_else(|| try_tool_at_row(app, visual_row.saturating_sub(1)))
+                        .is_some();
+                    if !on_tool {
+                        let content_col = col
+                            .saturating_sub(app.layout.messages.x)
+                            .min(app.content_width.saturating_sub(1));
+                        app.selection.start(content_col, visual_row);
                     }
-                    let content_col = col
-                        .saturating_sub(app.layout.messages.x)
-                        .min(app.content_width.saturating_sub(1));
-                    app.selection.start(content_col, visual_row);
                 }
                 if app.vim_mode && app.mode == AppMode::Insert && app.input.is_empty() {
                     app.mode = AppMode::Normal;
@@ -347,6 +348,27 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
             InputAction::None
         }
         MouseEventKind::Up(MouseButton::Left) => {
+            if !app.selection.active
+                && rect_contains(app.layout.messages, col, row)
+            {
+                let content_y = app.layout.messages.y;
+                if row >= content_y {
+                    let content_row = row - content_y;
+                    let visual_row = app.scroll_offset + content_row;
+                    let tool = try_tool_at_row(app, visual_row)
+                        .or_else(|| try_tool_at_row(app, visual_row.saturating_sub(1)));
+                    if let Some((msg_idx, tool_idx)) = tool {
+                        app.selection.clear();
+                        if app.expanded_tool_calls.contains(&(msg_idx, tool_idx)) {
+                            app.expanded_tool_calls.remove(&(msg_idx, tool_idx));
+                        } else {
+                            app.expanded_tool_calls.insert((msg_idx, tool_idx));
+                        }
+                        app.mark_dirty();
+                        return InputAction::None;
+                    }
+                }
+            }
             if app.selection.active {
                 let content_y = app.layout.messages.y;
                 let content_height = app.layout.messages.height;

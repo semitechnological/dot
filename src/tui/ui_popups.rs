@@ -296,13 +296,15 @@ pub fn draw_empty_state(app: &App, width: u16) -> Vec<Line<'static>> {
     }
 
     let art = [
-        "     _       _   ",
-        "  __| | ___ | |_ ",
-        " / _` |/ _ \\| __|",
-        "| (_| | (_) | |_ ",
-        " \\__,_|\\___/ \\__|",
+        "          @@@@@          ",
+        "          @@@@@          ",
+        "          @@@@@          ",
+        "                         ",
+        "@@@@@@@@@@@@@@@@@@@@@@@@@",
+        "@@@@@@@@@@@@@@@@@@@@@@@@@",
+        "@@@@@@@@@@@@@@@@@@@@@@@@@",
     ];
-    let art_w = 18u16;
+    let art_w = 25u16;
     let art_pad = " ".repeat((width.saturating_sub(art_w) / 2) as usize);
 
     let subtitle = "a terminal-native ai agent";

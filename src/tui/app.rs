@@ -228,12 +228,26 @@ pub struct SubagentState {
     pub background: bool,
 }
 
+pub struct SubagentToolEntry {
+    pub name: String,
+    pub detail: String,
+    pub done: bool,
+    pub is_error: bool,
+}
+
 pub struct BackgroundSubagentInfo {
     pub id: String,
     pub description: String,
     pub output: String,
     pub tools_completed: usize,
     pub done: bool,
+    pub started: Instant,
+    pub current_tool: Option<String>,
+    pub current_tool_detail: Option<String>,
+    pub tool_history: Vec<SubagentToolEntry>,
+    pub tokens: u32,
+    pub cost: f64,
+    pub text_lines: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -656,6 +670,13 @@ impl App {
                         output: String::new(),
                         tools_completed: 0,
                         done: false,
+                        started: Instant::now(),
+                        current_tool: None,
+                        current_tool_detail: None,
+                        tool_history: Vec::new(),
+                        tokens: 0,
+                        cost: 0.0,
+                        text_lines: Vec::new(),
                     });
                 } else {
                     self.active_subagent = Some(SubagentState {
@@ -676,6 +697,9 @@ impl App {
                     state.output.push_str(&text);
                 } else if let Some(bg) = self.background_subagents.iter_mut().find(|b| b.id == id) {
                     bg.output.push_str(&text);
+                    let lines: Vec<String> = bg.output.lines().map(|l| l.to_string()).collect();
+                    let start = lines.len().saturating_sub(20);
+                    bg.text_lines = lines[start..].to_vec();
                 }
             }
             AgentEvent::SubagentToolStart {
@@ -688,6 +712,15 @@ impl App {
                 {
                     state.current_tool = Some(tool_name);
                     state.current_tool_detail = Some(detail);
+                } else if let Some(bg) = self.background_subagents.iter_mut().find(|b| b.id == id) {
+                    bg.current_tool = Some(tool_name.clone());
+                    bg.current_tool_detail = Some(detail.clone());
+                    bg.tool_history.push(SubagentToolEntry {
+                        name: tool_name,
+                        detail,
+                        done: false,
+                        is_error: false,
+                    });
                 }
             }
             AgentEvent::SubagentToolComplete { id, .. } => {
@@ -698,7 +731,12 @@ impl App {
                     state.current_tool_detail = None;
                     state.tools_completed += 1;
                 } else if let Some(bg) = self.background_subagents.iter_mut().find(|b| b.id == id) {
+                    bg.current_tool = None;
+                    bg.current_tool_detail = None;
                     bg.tools_completed += 1;
+                    if let Some(entry) = bg.tool_history.iter_mut().rev().find(|e| !e.done) {
+                        entry.done = true;
+                    }
                 }
             }
             AgentEvent::SubagentComplete { id, .. } => {

@@ -8,7 +8,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use crate::agent::TodoStatus;
-use crate::tui::app::{App, AppMode, ChatMessage, ChipKind, InputChip, StatusLevel};
+use crate::tui::app::{
+    App, AppMode, BackgroundSubagentInfo, ChatMessage, ChipKind, InputChip, StatusLevel,
+};
 use crate::tui::markdown;
 use crate::tui::theme::Theme;
 use crate::tui::ui_popups;
@@ -162,6 +164,37 @@ fn draw_status_header(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
+    let (panel_area, msg_area) = if !app.background_subagents.is_empty() {
+        let max_tool_lines = app
+            .background_subagents
+            .iter()
+            .map(|b| b.tool_history.len())
+            .max()
+            .unwrap_or(0);
+        let panel_h = ((5 + max_tool_lines) as u16).min(area.height / 2).max(4);
+        let pa = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: panel_h,
+        };
+        let ma = Rect {
+            x: area.x,
+            y: area.y + panel_h,
+            width: area.width,
+            height: area.height.saturating_sub(panel_h),
+        };
+        (Some(pa), ma)
+    } else {
+        (None, area)
+    };
+
+    if let Some(pa) = panel_area {
+        draw_subagent_panel(frame, app, pa);
+    }
+
+    let area = msg_area;
+
     let [content_area, scrollbar_area] = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
         .constraints([Constraint::Min(0), Constraint::Length(1)])
@@ -953,6 +986,19 @@ fn draw_token_bar(frame: &mut Frame, app: &App, area: Rect) {
         left_spans.push(Span::styled(q_label, Style::default().fg(app.theme.accent)));
     }
 
+    if !app.background_subagents.is_empty() {
+        let total = app.background_subagents.len();
+        let done = app.background_subagents.iter().filter(|b| b.done).count();
+        let bg_label = if compact {
+            format!(" {}bg", total - done)
+        } else if done == total {
+            format!(" \u{00b7} {}/{} bg done", done, total)
+        } else {
+            format!(" \u{00b7} {} bg agents", total - done)
+        };
+        left_spans.push(Span::styled(bg_label, app.theme.subagent_working));
+    }
+
     let left_width: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
 
     let mut right_spans: Vec<Span<'static>> = Vec::new();
@@ -1083,12 +1129,14 @@ fn format_tokens(n: u32) -> String {
     }
 }
 
+type PreWrapResult = (Vec<Line<'static>>, Vec<usize>, Vec<Option<(usize, usize)>>);
+
 fn pre_wrap_lines(
     lines: Vec<Line<'static>>,
     line_to_msg: Vec<usize>,
     line_to_tool: Vec<Option<(usize, usize)>>,
     width: u16,
-) -> (Vec<Line<'static>>, Vec<usize>, Vec<Option<(usize, usize)>>) {
+) -> PreWrapResult {
     use unicode_width::UnicodeWidthChar;
     if width == 0 {
         return (lines, line_to_msg, line_to_tool);
@@ -1178,6 +1226,209 @@ fn char_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
         }
     }
     result
+}
+
+fn draw_subagent_panel(frame: &mut Frame, app: &App, area: Rect) {
+    if area.height < 3 {
+        return;
+    }
+
+    let total = app.background_subagents.len();
+    let done_count = app.background_subagents.iter().filter(|b| b.done).count();
+    let spinner_frames = ["◌", "◔", "◑", "◕", "●", "◕", "◑", "◔"];
+    let spin = spinner_frames[(app.tick_count / 8 % 8) as usize];
+
+    let header_text = if done_count == total {
+        format!(" {} subagents — {}/{} completed", spin, done_count, total)
+    } else {
+        format!(
+            " {} running {} subagents ({}/{} completed)",
+            spin,
+            total - done_count,
+            done_count,
+            total
+        )
+    };
+    let header_line = Line::from(Span::styled(header_text, app.theme.subagent_header));
+    frame.render_widget(
+        Paragraph::new(header_line),
+        Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        },
+    );
+
+    if area.height < 4 {
+        return;
+    }
+
+    let cols_area = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: area.height - 1,
+    };
+    let visible_count = (total).min(5);
+    if visible_count == 0 {
+        return;
+    }
+
+    let col_width = cols_area.width / visible_count as u16;
+    let constraints: Vec<Constraint> = (0..visible_count)
+        .map(|_| Constraint::Length(col_width))
+        .collect();
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(cols_area);
+
+    for (i, bg) in app
+        .background_subagents
+        .iter()
+        .take(visible_count)
+        .enumerate()
+    {
+        draw_subagent_column(frame, app, bg, cols[i]);
+    }
+}
+
+fn draw_subagent_column(frame: &mut Frame, app: &App, bg: &BackgroundSubagentInfo, area: Rect) {
+    let spinner_frames = ["◌", "◔", "◑", "◕", "●", "◕", "◑", "◔"];
+    let spin = spinner_frames[(app.tick_count / 8 % 8) as usize];
+
+    let status_char = if bg.done { "●" } else { spin };
+    let status_style = if bg.done {
+        app.theme.subagent_done
+    } else {
+        app.theme.subagent_working
+    };
+
+    let max_title = area.width.saturating_sub(4) as usize;
+    let desc: String = if bg.description.chars().count() > max_title && max_title > 1 {
+        let t: String = bg
+            .description
+            .chars()
+            .take(max_title.saturating_sub(1))
+            .collect();
+        format!("{}\u{2026}", t)
+    } else {
+        bg.description.clone()
+    };
+
+    let title_line = Line::from(vec![
+        Span::styled(format!("{} ", status_char), status_style),
+        Span::styled(
+            desc,
+            if bg.done {
+                app.theme.dim
+            } else {
+                app.theme.subagent_header
+            },
+        ),
+    ]);
+
+    let block = Block::bordered()
+        .border_style(app.theme.subagent_border)
+        .title(title_line);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height == 0 {
+        return;
+    }
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    let history_show = (inner.height as usize).saturating_sub(2);
+    let history = &bg.tool_history;
+    let start = history.len().saturating_sub(history_show);
+    if start > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  ... +{} earlier tools", start),
+            app.theme.dim,
+        )));
+    }
+    for entry in &history[start..] {
+        let (icon, style) = if entry.is_error {
+            ("✗", app.theme.error)
+        } else if entry.done {
+            ("✓", app.theme.subagent_done)
+        } else {
+            (
+                spinner_frames[(app.tick_count / 8 % 8) as usize],
+                app.theme.subagent_working,
+            )
+        };
+        let cat = crate::tui::tools::ToolCategory::from_name(&entry.name);
+        let label = if entry.detail.is_empty() {
+            cat.label()
+        } else {
+            format!("{} {}", cat.label(), entry.detail)
+        };
+        let max = inner.width.saturating_sub(3) as usize;
+        let display: String = if label.chars().count() > max && max > 1 {
+            let t: String = label.chars().take(max.saturating_sub(1)).collect();
+            format!("{}\u{2026}", t)
+        } else {
+            label
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{} ", icon), style),
+            Span::styled(display, if entry.done { app.theme.dim } else { style }),
+        ]));
+    }
+
+    if let Some(ref ct) = bg.current_tool {
+        let cat = crate::tui::tools::ToolCategory::from_name(ct);
+        let detail = bg.current_tool_detail.as_deref().unwrap_or("");
+        let label = if detail.is_empty() {
+            format!("{} {}", cat.intent(), cat.label())
+        } else {
+            format!("{} {}", cat.intent(), detail)
+        };
+        let ct_max = inner.width.saturating_sub(3) as usize;
+        let display: String = if label.chars().count() > ct_max && ct_max > 1 {
+            let t: String = label.chars().take(ct_max.saturating_sub(1)).collect();
+            format!("{}\u{2026}", t)
+        } else {
+            label
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", spinner_frames[(app.tick_count / 8 % 8) as usize]),
+                app.theme.subagent_working,
+            ),
+            Span::styled(display, app.theme.subagent_working),
+        ]));
+    }
+
+    let elapsed = bg.started.elapsed().as_secs_f64();
+    let elapsed_str = format_elapsed(elapsed);
+    let footer = if bg.done {
+        Line::from(Span::styled(
+            format!("Done {}  {}t", elapsed_str, bg.tools_completed),
+            app.theme.subagent_done,
+        ))
+    } else {
+        Line::from(Span::styled(
+            format!("Working… {}  {}t", elapsed_str, bg.tools_completed),
+            app.theme.dim,
+        ))
+    };
+
+    let content_height = inner.height as usize;
+    let body_lines = content_height.saturating_sub(1);
+    let render_lines: Vec<Line<'static>> = lines.into_iter().take(body_lines).collect();
+
+    let mut all: Vec<Line<'static>> = render_lines;
+    while all.len() < body_lines {
+        all.push(Line::from(""));
+    }
+    all.push(footer);
+
+    frame.render_widget(Paragraph::new(all), inner);
 }
 
 fn render_selection_highlight(frame: &mut Frame, app: &App, area: Rect) {

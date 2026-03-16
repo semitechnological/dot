@@ -107,6 +107,10 @@ pub struct Theme {
     pub progress_bar_empty: Style,
     pub streaming_dot: Style,
     pub user_text_bg: Color,
+    pub subagent_border: Style,
+    pub subagent_header: Style,
+    pub subagent_done: Style,
+    pub subagent_working: Style,
 }
 
 impl Theme {
@@ -197,6 +201,10 @@ impl Theme {
             progress_bar_empty: Style::default().fg(surface),
             streaming_dot: Style::default().fg(accent),
             user_text_bg: Color::Rgb(38, 40, 58),
+            subagent_border: Style::default().fg(surface),
+            subagent_header: Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            subagent_done: Style::default().fg(green),
+            subagent_working: Style::default().fg(accent),
         }
     }
 
@@ -273,6 +281,10 @@ impl Theme {
             progress_bar_empty: Style::default().fg(surface),
             streaming_dot: Style::default().fg(accent),
             user_text_bg: Color::Rgb(218, 222, 232),
+            subagent_border: Style::default().fg(surface),
+            subagent_header: Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            subagent_done: Style::default().fg(green),
+            subagent_working: Style::default().fg(accent),
         }
     }
 
@@ -348,6 +360,10 @@ impl Theme {
             progress_bar_empty: dim,
             streaming_dot: dim,
             user_text_bg: Color::Indexed(0),
+            subagent_border: dim,
+            subagent_header: bold,
+            subagent_done: bold,
+            subagent_working: dim,
         }
     }
 }

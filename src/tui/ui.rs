@@ -795,14 +795,9 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
     let display_lines: Vec<Line<'static>> = if app.is_streaming && !has_input {
         let dim = Style::default().fg(app.theme.input_dim_fg);
-        let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let spin = spinner_frames[(app.tick_count / 6 % spinner_frames.len() as u64) as usize];
         let word = "generating";
         let wave_pos = (app.tick_count / 4) as usize;
-        let mut left_spans: Vec<Span<'static>> = vec![Span::styled(
-            format!("{spin} "),
-            Style::default().fg(app.theme.accent),
-        )];
+        let mut left_spans: Vec<Span<'static>> = Vec::new();
         for (i, ch) in word.chars().enumerate() {
             let dist = if wave_pos % (word.len() + 4) > i {
                 (wave_pos % (word.len() + 4)) - i

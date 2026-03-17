@@ -795,10 +795,47 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
     let display_lines: Vec<Line<'static>> = if app.is_streaming && !has_input {
         let dim = Style::default().fg(app.theme.input_dim_fg);
-        let mut left_spans = vec![
-            Span::styled("\u{203a} ", dim),
-            Span::styled("generating", dim),
+        let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let spin = spinner_frames[(app.tick_count / 6 % spinner_frames.len() as u64) as usize];
+        let word = "generating";
+        let wave_pos = (app.tick_count / 4) as usize;
+        let mut left_spans: Vec<Span<'static>> = vec![
+            Span::styled(
+                format!("{spin} "),
+                Style::default().fg(app.theme.accent),
+            ),
         ];
+        for (i, ch) in word.chars().enumerate() {
+            let dist = if wave_pos % (word.len() + 4) > i {
+                (wave_pos % (word.len() + 4)) - i
+            } else {
+                i - (wave_pos % (word.len() + 4))
+            };
+            let style = if dist == 0 {
+                Style::default().fg(app.theme.accent)
+            } else if dist <= 2 {
+                if let (Color::Rgb(ar, ag, ab), Color::Rgb(dr, dg, db)) =
+                    (app.theme.accent, app.theme.input_dim_fg)
+                {
+                    let t = if dist == 1 { 0.5 } else { 0.8 };
+                    let lerp = |a: u8, b: u8, t: f32| -> u8 {
+                        (a as f32 + (b as f32 - a as f32) * t) as u8
+                    };
+                    Style::default().fg(Color::Rgb(
+                        lerp(ar, dr, t),
+                        lerp(ag, dg, t),
+                        lerp(ab, db, t),
+                    ))
+                } else if dist == 1 {
+                    Style::default().fg(app.theme.accent)
+                } else {
+                    dim
+                }
+            } else {
+                dim
+            };
+            left_spans.push(Span::styled(String::from(ch), style));
+        }
         let mut right_spans: Vec<Span<'static>> = Vec::new();
         if let Some(elapsed) = app.streaming_elapsed_secs() {
             right_spans.push(Span::styled(

@@ -20,7 +20,7 @@ pub(super) struct AuthResolved {
 pub(super) async fn refresh_oauth_token(
     client: &reqwest::Client,
     refresh_token: &str,
-) -> anyhow::Result<(String, i64)> {
+) -> anyhow::Result<(String, i64, Option<String>)> {
     let resp = client
         .post("https://console.anthropic.com/v1/oauth/token")
         .json(&serde_json::json!({
@@ -46,6 +46,7 @@ pub(super) async fn refresh_oauth_token(
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("No access_token in refresh response"))?
         .to_string();
+    let new_refresh_token = data["refresh_token"].as_str().map(String::from);
     let expires_in = data["expires_in"].as_i64().unwrap_or(3600);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -53,5 +54,5 @@ pub(super) async fn refresh_oauth_token(
         .as_secs() as i64;
     let expires_at = now + expires_in;
 
-    Ok((access_token, expires_at))
+    Ok((access_token, expires_at, new_refresh_token))
 }

@@ -71,7 +71,7 @@ impl AnthropicProvider {
             req = req
                 .header(
                     "anthropic-beta",
-                    "oauth-2025-04-20,interleaved-thinking-2025-05-14",
+                    "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
                 )
                 .header("user-agent", "claude-code/2.1.49 (external, cli)");
         }
@@ -113,15 +113,28 @@ impl AnthropicProvider {
                 let token = if now >= expires_at_secs - 60 {
                     let rt = refresh_token.clone();
                     match refresh_oauth_token(&self.client, &rt).await {
-                        Ok((new_token, new_expires_at)) => {
+                        Ok((new_token, new_expires_at, new_refresh)) => {
                             if let AnthropicAuth::OAuth {
                                 access_token,
+                                refresh_token,
                                 expires_at,
-                                ..
                             } = &mut *auth
                             {
                                 *access_token = new_token.clone();
                                 *expires_at = new_expires_at;
+                                if let Some(ref rt) = new_refresh {
+                                    *refresh_token = rt.clone();
+                                }
+                            }
+                            if let Ok(mut creds) = crate::auth::Credentials::load() {
+                                let cred = crate::auth::ProviderCredential::OAuth {
+                                    access_token: new_token.clone(),
+                                    refresh_token: new_refresh,
+                                    expires_at: Some(new_expires_at),
+                                    api_key: None,
+                                };
+                                creds.set("anthropic", cred);
+                                let _ = creds.save();
                             }
                             new_token
                         }
@@ -211,7 +224,7 @@ impl Provider for AnthropicProvider {
                     req = req
                         .header(
                             "anthropic-beta",
-                            "oauth-2025-04-20,interleaved-thinking-2025-05-14",
+                            "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
                         )
                         .header("user-agent", "claude-code/2.1.49 (external, cli)");
                 }
@@ -327,12 +340,29 @@ impl Provider for AnthropicProvider {
                 "edits": [{ "type": "compact_20260112" }]
             }));
 
+            let system_value = if auth.is_oauth {
+                let identity = serde_json::json!({
+                    "type": "text",
+                    "text": "You are Claude Code, Anthropic's official CLI for Claude.",
+                    "cache_control": { "type": "ephemeral" }
+                });
+                match system {
+                    Some(s) => Some(serde_json::json!([
+                        identity,
+                        { "type": "text", "text": s }
+                    ])),
+                    None => Some(serde_json::json!([identity])),
+                }
+            } else {
+                system.map(|s| serde_json::Value::String(s))
+            };
+
             let body = AnthropicRequest {
                 model: &model,
                 messages: convert_messages(&messages),
                 max_tokens: effective_max_tokens,
                 stream: true,
-                system: system.as_deref(),
+                system: system_value,
                 tools: convert_tools(&tools),
                 temperature: 1.0,
                 thinking,
@@ -351,9 +381,11 @@ impl Provider for AnthropicProvider {
                 req_builder = req_builder
                     .header(
                         "anthropic-beta",
-                        format!("oauth-2025-04-20,interleaved-thinking-2025-05-14,{compact_beta}"),
+                        format!("claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,{compact_beta}"),
                     )
-                    .header("user-agent", "claude-code/2.1.49 (external, cli)");
+                    .header("user-agent", "claude-code/2.1.49 (external, cli)")
+                    .header("anthropic-dangerous-direct-browser-access", "true")
+                    .header("x-app", "cli");
             } else if thinking_budget >= 1024 {
                 req_builder = req_builder.header(
                     "anthropic-beta",

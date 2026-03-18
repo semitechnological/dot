@@ -252,8 +252,7 @@ async fn run_app(
                     .collect();
                 let has_tools = !tool_calls.is_empty();
                 let clean_content = if has_tools {
-                    let trimmed = m.content.replace("[tool use]", "").trim().to_string();
-                    trimmed
+                    m.content.replace("[tool use]", "").trim().to_string()
                 } else {
                     m.content.clone()
                 };
@@ -468,13 +467,13 @@ async fn handle_event(
         AppEvent::Paste(text) => input::handle_paste(app, text),
         AppEvent::Tick => {
             app.tick_count = app.tick_count.wrapping_add(1);
-            if let Some(at) = app.thinking_collapse_at {
-                if std::time::Instant::now() >= at {
-                    app.thinking_expanded = false;
-                    app.auto_opened_thinking = false;
-                    app.thinking_collapse_at = None;
-                    app.mark_dirty();
-                }
+            if let Some(at) = app.thinking_collapse_at
+                && std::time::Instant::now() >= at
+            {
+                app.thinking_expanded = false;
+                app.auto_opened_thinking = false;
+                app.thinking_collapse_at = None;
+                app.mark_dirty();
             }
             if app.status_message.as_ref().is_some_and(|s| s.expired()) {
                 app.status_message = None;

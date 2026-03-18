@@ -59,6 +59,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_messages(frame, app, chunks[1]);
     draw_input_separator(frame, app, chunks[2]);
     draw_input(frame, app, chunks[3]);
+    render_input_selection(frame, app, chunks[3]);
     draw_input_separator(frame, app, chunks[4]);
     draw_token_bar(frame, app, chunks[5]);
 
@@ -137,13 +138,13 @@ fn draw_status_header(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let right_text = if !compact || area.width >= 40 {
-        format!("{} ", model_display)
+        model_display
     } else {
         String::new()
     };
 
     let right_width = right_text.chars().count();
-    let max_title = (area.width as usize).saturating_sub(right_width + 2);
+    let max_title = (area.width as usize).saturating_sub(right_width + 1);
     let display_title = if title_text.chars().count() > max_title && max_title > 2 {
         let t: String = title_text
             .chars()
@@ -154,7 +155,7 @@ fn draw_status_header(frame: &mut Frame, app: &App, area: Rect) {
         title_text.to_string()
     };
 
-    let left_text = format!(" {}", display_title);
+    let left_text = display_title;
     let left_width = left_text.chars().count();
     let gap = (area.width as usize).saturating_sub(left_width + right_width);
 
@@ -175,7 +176,17 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             .map(|b| b.tool_history.len())
             .max()
             .unwrap_or(0);
-        let panel_h = ((5 + max_tool_lines) as u16).min(area.height / 2).max(4);
+        let panel_h = if app.subagent_panel_expanded {
+            ((5 + max_tool_lines) as u16)
+                .min(20)
+                .min(area.height / 2)
+                .max(4)
+        } else {
+            ((5 + max_tool_lines) as u16)
+                .min(8)
+                .min(area.height / 4)
+                .max(3)
+        };
         let pa = Rect {
             x: area.x,
             y: area.y,
@@ -195,6 +206,9 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 
     if let Some(pa) = panel_area {
         draw_subagent_panel(frame, app, pa);
+        app.layout.subagent_panel = Some(pa);
+    } else {
+        app.layout.subagent_panel = None;
     }
 
     let area = msg_area;
@@ -206,11 +220,10 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 
     app.layout.messages = content_area;
 
-    let lpad: u16 = if is_compact(content_area.width) { 0 } else { 1 };
     let inner = Rect {
-        x: content_area.x + lpad,
+        x: content_area.x,
         y: content_area.y,
-        width: content_area.width.saturating_sub(lpad + 2),
+        width: content_area.width,
         height: content_area.height,
     };
 
@@ -458,12 +471,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let code_bg = app.theme.code_bg;
     let content_y = content_area.y;
     let content_h = content_area.height as usize;
-    let body_cols = if is_compact(content_area.width) {
-        2u16
-    } else {
-        4u16
-    };
-    let bg_left = content_area.x + body_cols;
+    let bg_left = content_area.x;
     let bg_right = content_area.x + inner.width;
     let buf = frame.buffer_mut();
     let mut is_code: Vec<bool> = (0..content_h)
@@ -532,8 +540,8 @@ fn render_message(
     line_to_tool: &mut Vec<Option<(usize, usize)>>,
 ) {
     let compact = ctx.inner_width < 55;
-    let body_indent: &str = if compact { " " } else { "  " };
-    let body_indent_cols: u16 = if compact { 1 } else { 2 };
+    let body_indent: &str = "";
+    let body_indent_cols: u16 = 0;
 
     lines.push(Line::from(""));
     line_to_tool.push(None);
@@ -576,7 +584,7 @@ fn render_message(
             line_to_tool.push(None);
         }
         "compact" => {
-            let pad = if compact { " " } else { "  " };
+            let pad = if compact { "" } else { " " };
             for text_line in msg.content.lines() {
                 line_to_tool.push(None);
                 lines.push(Line::from(vec![
@@ -591,7 +599,6 @@ fn render_message(
                     thinking,
                     ctx.thinking_expanded,
                     ctx.theme,
-                    compact,
                     lines,
                     line_to_tool,
                     msg_idx,
@@ -718,13 +725,12 @@ fn render_thinking_block(
     thinking: &str,
     expanded: bool,
     theme: &crate::tui::theme::Theme,
-    compact: bool,
     lines: &mut Vec<Line<'static>>,
     line_to_tool: &mut Vec<Option<(usize, usize)>>,
     msg_idx: usize,
     width: u16,
 ) {
-    let pad = if compact { " " } else { "  " };
+    let pad = "";
     let prefix = format!("{}\u{2502} ", pad);
     let prefix_chars = prefix.chars().count();
     let word_count = thinking.split_whitespace().count();
@@ -732,7 +738,7 @@ fn render_thinking_block(
     if expanded {
         line_to_tool.push(Some((msg_idx, usize::MAX)));
         lines.push(Line::from(vec![
-            Span::styled(format!("{}\u{25be} ", pad), theme.dim),
+            Span::styled("\u{25be} ".to_string(), theme.dim),
             Span::styled(
                 "thinking",
                 Style::default()
@@ -767,7 +773,7 @@ fn render_thinking_block(
     } else {
         line_to_tool.push(Some((msg_idx, usize::MAX)));
         lines.push(Line::from(vec![
-            Span::styled(format!("{}\u{25b8} ", pad), theme.dim),
+            Span::styled("\u{25b8} ".to_string(), theme.dim),
             Span::styled(
                 format!("thought for {}s", secs),
                 Style::default()
@@ -1375,7 +1381,7 @@ fn draw_subagent_panel(frame: &mut Frame, app: &App, area: Rect) {
     let spin = spinner_frames[(app.tick_count / 8 % 8) as usize];
 
     let header_text = if done_count == total {
-        format!(" {} subagents — {}/{} completed", spin, done_count, total)
+        format!(" ● {} subagents completed", total)
     } else {
         format!(
             " {} running {} subagents ({}/{} completed)",
@@ -1540,7 +1546,11 @@ fn draw_subagent_column(frame: &mut Frame, app: &App, bg: &BackgroundSubagentInf
         ]));
     }
 
-    let elapsed = bg.started.elapsed().as_secs_f64();
+    let elapsed = if let Some(fin) = bg.finished_at {
+        fin.duration_since(bg.started).as_secs_f64()
+    } else {
+        bg.started.elapsed().as_secs_f64()
+    };
     let elapsed_str = format_elapsed(elapsed);
     let footer = if bg.done {
         Line::from(Span::styled(
@@ -1565,6 +1575,57 @@ fn draw_subagent_column(frame: &mut Frame, app: &App, bg: &BackgroundSubagentInf
     all.push(footer);
 
     frame.render_widget(Paragraph::new(all), inner);
+}
+
+fn render_input_selection(frame: &mut Frame, app: &App, area: Rect) {
+    let Some((sel_start, sel_end)) = app.input_selection_range() else {
+        return;
+    };
+    if app.paste_blocks.is_empty() {
+    } else {
+        return;
+    }
+    let prefix_w: usize = 2;
+    let width = area.width as usize;
+    if width == 0 {
+        return;
+    }
+    let att_rows: u16 = if app.attachments.is_empty() { 0 } else { 1 };
+    let buf = frame.buffer_mut();
+
+    let mut byte_pos: usize = 0;
+    let mut screen_row: u16 = att_rows;
+    let mut screen_col: usize = prefix_w;
+
+    for ch in app.input.chars() {
+        if byte_pos >= sel_end {
+            break;
+        }
+        let ch_len = ch.len_utf8();
+        if ch == '\n' {
+            byte_pos += ch_len;
+            screen_row += 1;
+            screen_col = prefix_w;
+            continue;
+        }
+        if byte_pos >= sel_start {
+            let sy = area.y + screen_row;
+            let sx = area.x + screen_col as u16;
+            if sy < area.y + area.height
+                && sx < area.x + area.width
+                && let Some(cell) = buf.cell_mut(Position::new(sx, sy))
+            {
+                let current = cell.style();
+                cell.set_style(current.add_modifier(Modifier::REVERSED));
+            }
+        }
+        screen_col += 1;
+        if screen_col >= width {
+            screen_col = 0;
+            screen_row += 1;
+        }
+        byte_pos += ch_len;
+    }
 }
 
 fn render_selection_highlight(frame: &mut Frame, app: &App, area: Rect) {

@@ -171,15 +171,18 @@ pub struct HookConfig {
 pub struct SubagentSettings {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_max_subagent_turns")]
-    pub max_turns: usize,
+    #[serde(default)]
+    pub max_turns: Option<usize>,
+    #[serde(default)]
+    pub default_model: Option<String>,
 }
 
 impl Default for SubagentSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            max_turns: 20,
+            max_turns: None,
+            default_model: None,
         }
     }
 }
@@ -213,10 +216,6 @@ fn default_inject_count() -> usize {
 
 fn default_max_memories() -> usize {
     2000
-}
-
-fn default_max_subagent_turns() -> usize {
-    20
 }
 
 fn default_true() -> bool {

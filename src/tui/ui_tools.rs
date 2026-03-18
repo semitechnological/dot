@@ -69,8 +69,8 @@ fn render_tool_calls_inner(
     is_expanded: impl Fn(usize) -> bool,
     mut line_to_tool: Option<&mut Vec<Option<(usize, usize)>>>,
 ) {
-    let compact = ctx.compact;
-    let pad = if compact { " " } else { "  " };
+    let _compact = ctx.compact;
+    let pad = "";
     let multi = tool_calls.len() > 1;
 
     for (tool_idx, tc) in tool_calls.iter().enumerate() {
@@ -404,8 +404,8 @@ pub fn render_streaming_state(
     stream_msg_idx: usize,
 ) -> (usize, bool, usize) {
     let compact = width < 55;
-    let pad = if compact { " " } else { "  " };
-    let pad_cols: u16 = if compact { 1 } else { 2 };
+    let pad = "";
+    let pad_cols: u16 = 0;
 
     let has_segments = !app.streaming_segments.is_empty();
     let has_text = !app.current_response.is_empty();
@@ -413,6 +413,62 @@ pub fn render_streaming_state(
 
     lines.push(Line::from(""));
     line_to_tool.push(None);
+
+    if !app.current_thinking.is_empty() && has_segments {
+        let stream_msg_idx_for_thinking = stream_msg_idx;
+        let thinking_pad = "";
+        if app.thinking_expanded {
+            line_to_tool.push(Some((stream_msg_idx_for_thinking, usize::MAX)));
+            lines.push(Line::from(vec![
+                Span::styled("▾ ", app.theme.dim),
+                Span::styled(
+                    "thinking",
+                    ratatui::style::Style::default()
+                        .fg(app.theme.muted_fg)
+                        .add_modifier(ratatui::style::Modifier::ITALIC),
+                ),
+            ]));
+            let prefix = format!("{}\u{2502} ", thinking_pad);
+            let prefix_chars = prefix.chars().count();
+            let content_width = (width as usize).saturating_sub(prefix_chars);
+            let thinking_style = ratatui::style::Style::default()
+                .fg(app.theme.muted_fg)
+                .add_modifier(ratatui::style::Modifier::ITALIC);
+            for text_line in app.current_thinking.lines() {
+                let chars: Vec<char> = text_line.chars().collect();
+                if content_width == 0 || chars.len() <= content_width {
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix.clone(), app.theme.thinking),
+                        Span::styled(text_line.to_string(), thinking_style),
+                    ]));
+                    line_to_tool.push(None);
+                } else {
+                    for chunk in chars.chunks(content_width) {
+                        lines.push(Line::from(vec![
+                            Span::styled(prefix.clone(), app.theme.thinking),
+                            Span::styled(chunk.iter().collect::<String>(), thinking_style),
+                        ]));
+                        line_to_tool.push(None);
+                    }
+                }
+            }
+            lines.push(Line::from(""));
+            line_to_tool.push(None);
+        } else {
+            let word_count = app.current_thinking.split_whitespace().count();
+            let secs = (word_count / 8).max(1);
+            line_to_tool.push(Some((stream_msg_idx_for_thinking, usize::MAX)));
+            lines.push(Line::from(vec![
+                Span::styled("▸ ", app.theme.dim),
+                Span::styled(
+                    format!("thought for {}s", secs),
+                    ratatui::style::Style::default()
+                        .fg(app.theme.muted_fg)
+                        .add_modifier(ratatui::style::Modifier::ITALIC),
+                ),
+            ]));
+        }
+    }
 
     let mut prev_was_tool = false;
     let mut tool_idx_base = 0;
@@ -653,6 +709,7 @@ fn render_waiting_dot(
     lines: &mut Vec<Line<'static>>,
     line_to_tool: &mut Vec<Option<(usize, usize)>>,
 ) {
+    let has_segments = !app.streaming_segments.is_empty();
     let blink_on = (app.tick_count / 30).is_multiple_of(2);
     let dot_char = if blink_on { "\u{00b7}" } else { " " };
     let mut dot_spans = vec![
@@ -670,7 +727,7 @@ fn render_waiting_dot(
     let padding = (width as usize).saturating_sub(left_width + right_width);
     dot_spans.push(Span::raw(" ".repeat(padding)));
     dot_spans.extend(right_spans);
-    let has_live_thinking = !app.current_thinking.is_empty();
+    let has_live_thinking = !app.current_thinking.is_empty() && !has_segments;
     lines.push(Line::from(dot_spans));
     line_to_tool.push(None);
     if has_live_thinking && app.thinking_expanded {
@@ -711,9 +768,9 @@ pub fn render_streaming_tail(
     prev_was_tool: bool,
     _tool_idx_base: usize,
 ) {
-    let compact = width < 55;
-    let pad = if compact { " " } else { "  " };
-    let pad_cols: u16 = if compact { 1 } else { 2 };
+    let _compact = width < 55;
+    let pad = "";
+    let pad_cols: u16 = 0;
     let has_segments = !app.streaming_segments.is_empty();
     let has_text = !app.current_response.is_empty();
     let has_tool = app.pending_tool_name.is_some();

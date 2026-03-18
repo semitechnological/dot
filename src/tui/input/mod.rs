@@ -164,6 +164,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
     }
 
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        if app.input_selection_range().is_some() {
+            if let Some(text) = app.copy_input_selection() {
+                crate::tui::app::copy_to_clipboard(&text);
+            }
+            return InputAction::None;
+        }
         if app.model_selector.visible {
             app.model_selector.close();
             return InputAction::None;
@@ -200,6 +206,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> InputAction {
             app.cursor_pos = 0;
             app.paste_blocks.clear();
             app.attachments.clear();
+            app.clear_input_selection();
             return InputAction::None;
         }
         return InputAction::Quit;

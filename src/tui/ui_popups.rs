@@ -30,7 +30,7 @@ fn centered_popup(area: Rect, content_width: usize, content_height: usize) -> Re
 }
 
 fn popup_rect(area: Rect) -> Rect {
-    let w = (((area.width as u32) * 60 / 100).max(40).min(72)) as u16;
+    let w = ((area.width as u32) * 60 / 100).clamp(40, 72) as u16;
     let w = w.min(area.width.saturating_sub(4));
     let h = (((area.height as u32) * 55 / 100).max(10)) as u16;
     let h = h.min(area.height.saturating_sub(4));
@@ -1023,7 +1023,7 @@ pub fn draw_aside_popup(frame: &mut Frame, app: &mut App) {
     let muted = app.theme.muted_fg;
     let full = frame.area();
 
-    let popup_width = (full.width * 3 / 4).max(40).min(80) as usize;
+    let popup_width = (full.width * 3 / 4).clamp(40, 80) as usize;
     let popup_max_height = (full.height * 3 / 4).max(10) as usize;
 
     let mut lines: Vec<Line<'static>> = Vec::new();

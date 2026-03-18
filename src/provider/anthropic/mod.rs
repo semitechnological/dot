@@ -354,7 +354,7 @@ impl Provider for AnthropicProvider {
                     None => Some(serde_json::json!([identity])),
                 }
             } else {
-                system.map(|s| serde_json::Value::String(s))
+                system.map(serde_json::Value::String)
             };
 
             let body = AnthropicRequest {

@@ -53,15 +53,21 @@ impl super::Agent {
         }];
 
         let mut final_text = String::new();
+        let model_override = self.subagent_model.clone();
 
         for _turn in 0..max_turns {
             let mut tool_defs: Vec<ToolDefinition> = self.tools.definitions_filtered(&tool_filter);
             tool_defs.retain(|t| t.name != "subagent" && t.name != "subagent_result");
 
-            let mut stream_rx = self
-                .provider()
-                .stream(&messages, Some(&system_prompt), &tool_defs, 8192, 0)
-                .await?;
+            let mut stream_rx = if let Some(ref model) = model_override {
+                self.provider()
+                    .stream_with_model(model, &messages, Some(&system_prompt), &tool_defs, 8192, 0)
+                    .await?
+            } else {
+                self.provider()
+                    .stream(&messages, Some(&system_prompt), &tool_defs, 8192, 0)
+                    .await?
+            };
 
             let mut text = String::new();
             let mut tool_calls: Vec<PendingCall> = Vec::new();
@@ -237,6 +243,7 @@ impl super::Agent {
             tool_defs,
             system_prompt,
             max_turns: self.subagent_max_turns,
+            model_override: self.subagent_model.clone(),
             event_tx: tx,
             results: Arc::clone(&self.background_results),
         };
@@ -263,6 +270,7 @@ struct BackgroundCtx {
     tool_defs: Vec<ToolDefinition>,
     system_prompt: String,
     max_turns: usize,
+    model_override: Option<String>,
     event_tx: UnboundedSender<AgentEvent>,
     results: Arc<std::sync::Mutex<HashMap<String, String>>>,
 }
@@ -302,10 +310,22 @@ async fn run_background_inner(ctx: &BackgroundCtx) -> Result<String> {
     let mut final_text = String::new();
 
     for _turn in 0..ctx.max_turns {
-        let mut stream_rx = ctx
-            .provider
-            .stream(&messages, Some(&ctx.system_prompt), &ctx.tool_defs, 8192, 0)
-            .await?;
+        let mut stream_rx = if let Some(ref model) = ctx.model_override {
+            ctx.provider
+                .stream_with_model(
+                    model,
+                    &messages,
+                    Some(&ctx.system_prompt),
+                    &ctx.tool_defs,
+                    8192,
+                    0,
+                )
+                .await?
+        } else {
+            ctx.provider
+                .stream(&messages, Some(&ctx.system_prompt), &ctx.tool_defs, 8192, 0)
+                .await?
+        };
 
         let mut text = String::new();
         let mut tool_calls: Vec<PendingCall> = Vec::new();

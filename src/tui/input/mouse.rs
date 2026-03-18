@@ -304,17 +304,28 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                 }
             }
 
+            if let Some(panel) = app.layout.subagent_panel
+                && rect_contains(panel, col, row)
+            {
+                app.subagent_panel_expanded = !app.subagent_panel_expanded;
+                app.mark_dirty();
+                return InputAction::None;
+            }
+
             if rect_contains(app.layout.input, col, row) {
                 if app.vim_mode {
                     app.mode = AppMode::Insert;
                 }
-                let inner_x = col.saturating_sub(app.layout.input.x + 3);
-                let inner_y = row.saturating_sub(app.layout.input.y + 1);
+                let inner_x = col.saturating_sub(app.layout.input.x + 2);
+                let att_rows = if app.attachments.is_empty() { 0 } else { 1 };
+                let inner_y = row.saturating_sub(app.layout.input.y + att_rows);
                 let target_offset =
                     compute_click_cursor_pos(&app.input, inner_x as usize, inner_y as usize);
                 app.cursor_pos = target_offset;
+                app.input_selection = Some((target_offset, target_offset));
                 InputAction::None
             } else if rect_contains(app.layout.messages, col, row) {
+                app.clear_input_selection();
                 let content_y = app.layout.messages.y;
                 if row >= content_y {
                     let content_row = (row - content_y) as u32;
@@ -339,6 +350,15 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
             }
         }
         MouseEventKind::Drag(MouseButton::Left) => {
+            if app.input_selection.is_some() && rect_contains(app.layout.input, col, row) {
+                let inner_x = col.saturating_sub(app.layout.input.x + 2);
+                let att_rows = if app.attachments.is_empty() { 0 } else { 1 };
+                let inner_y = row.saturating_sub(app.layout.input.y + att_rows);
+                let target =
+                    compute_click_cursor_pos(&app.input, inner_x as usize, inner_y as usize);
+                app.cursor_pos = target;
+                return InputAction::None;
+            }
             if app.selection.active {
                 let content_y = app.layout.messages.y;
                 let content_height = app.layout.messages.height;
@@ -356,6 +376,12 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
             InputAction::None
         }
         MouseEventKind::Up(MouseButton::Left) => {
+            if app.input_selection.is_some() {
+                if app.input_selection_range().is_none() {
+                    app.clear_input_selection();
+                }
+                return InputAction::None;
+            }
             if !app.selection.active && rect_contains(app.layout.messages, col, row) {
                 let content_y = app.layout.messages.y;
                 if row >= content_y {

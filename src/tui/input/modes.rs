@@ -54,33 +54,79 @@ pub(super) fn handle_normal(app: &mut App, key: KeyEvent) -> InputAction {
 }
 
 pub(super) fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
+    if key.modifiers.contains(KeyModifiers::SHIFT) {
+        match key.code {
+            KeyCode::Left => {
+                app.select_left();
+                return InputAction::None;
+            }
+            KeyCode::Right => {
+                app.select_right();
+                return InputAction::None;
+            }
+            KeyCode::Home => {
+                app.select_home();
+                return InputAction::None;
+            }
+            KeyCode::End => {
+                app.select_end();
+                return InputAction::None;
+            }
+            _ => {}
+        }
+    }
+
+    let is_super = key.modifiers.contains(KeyModifiers::SUPER);
+    if is_super || key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('c') => {
+                if let Some(text) = app.copy_input_selection() {
+                    crate::tui::app::copy_to_clipboard(&text);
+                    return InputAction::None;
+                }
+            }
+            KeyCode::Char('x') => {
+                if let Some(text) = app.copy_input_selection() {
+                    crate::tui::app::copy_to_clipboard(&text);
+                    app.delete_input_selection();
+                    return InputAction::None;
+                }
+            }
+            KeyCode::Char('a') if is_super || key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.select_all_input();
+                return InputAction::None;
+            }
+            _ => {}
+        }
+    }
+
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return InputAction::OpenRenamePopup;
             }
             KeyCode::Char('t') => return InputAction::CycleThinkingLevel,
-            KeyCode::Char('a') => {
-                app.move_cursor_home();
-                return InputAction::None;
-            }
             KeyCode::Char('e') => {
                 return InputAction::OpenExternalEditor;
             }
             KeyCode::Char('w') => {
+                app.delete_input_selection();
                 app.delete_word_before();
                 return InputAction::None;
             }
             KeyCode::Char('k') => {
+                app.delete_input_selection();
                 app.delete_to_end();
                 return InputAction::None;
             }
             KeyCode::Char('u') => {
+                app.delete_input_selection();
                 app.delete_to_start();
                 return InputAction::None;
             }
             KeyCode::Char('j') => {
                 if !app.input.is_empty() {
+                    app.delete_input_selection();
                     app.insert_char('\n');
                 }
                 return InputAction::None;
@@ -97,6 +143,7 @@ pub(super) fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
             }
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 if !app.input.is_empty() {
+                    app.delete_input_selection();
                     app.insert_char('\n');
                 }
                 InputAction::None
@@ -105,30 +152,36 @@ pub(super) fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
             KeyCode::Char(c) => handle_char_input(app, c),
             KeyCode::Backspace => handle_backspace(app),
             KeyCode::Up => {
+                app.clear_input_selection();
                 if !app.move_cursor_up() {
                     app.history_prev();
                 }
                 InputAction::None
             }
             KeyCode::Down => {
+                app.clear_input_selection();
                 if !app.move_cursor_down() {
                     app.history_next();
                 }
                 InputAction::None
             }
             KeyCode::Left => {
+                app.clear_input_selection();
                 app.move_cursor_left();
                 InputAction::None
             }
             KeyCode::Right => {
+                app.clear_input_selection();
                 app.move_cursor_right();
                 InputAction::None
             }
             KeyCode::Home => {
+                app.clear_input_selection();
                 app.move_cursor_home();
                 InputAction::None
             }
             KeyCode::End => {
+                app.clear_input_selection();
                 app.move_cursor_end();
                 InputAction::None
             }
@@ -143,6 +196,7 @@ pub(super) fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
         }
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
             if !app.input.is_empty() {
+                app.delete_input_selection();
                 app.insert_char('\n');
             }
             InputAction::None
@@ -151,30 +205,36 @@ pub(super) fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
         KeyCode::Char(c) => handle_char_input(app, c),
         KeyCode::Backspace => handle_backspace(app),
         KeyCode::Up => {
+            app.clear_input_selection();
             if !app.move_cursor_up() {
                 app.history_prev();
             }
             InputAction::None
         }
         KeyCode::Down => {
+            app.clear_input_selection();
             if !app.move_cursor_down() {
                 app.history_next();
             }
             InputAction::None
         }
         KeyCode::Left => {
+            app.clear_input_selection();
             app.move_cursor_left();
             InputAction::None
         }
         KeyCode::Right => {
+            app.clear_input_selection();
             app.move_cursor_right();
             InputAction::None
         }
         KeyCode::Home => {
+            app.clear_input_selection();
             app.move_cursor_home();
             InputAction::None
         }
         KeyCode::End => {
+            app.clear_input_selection();
             app.move_cursor_end();
             InputAction::None
         }
@@ -183,13 +243,55 @@ pub(super) fn handle_insert(app: &mut App, key: KeyEvent) -> InputAction {
 }
 
 pub(super) fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
+    if key.modifiers.contains(KeyModifiers::SHIFT) {
+        match key.code {
+            KeyCode::Left => {
+                app.select_left();
+                return InputAction::None;
+            }
+            KeyCode::Right => {
+                app.select_right();
+                return InputAction::None;
+            }
+            KeyCode::Home => {
+                app.select_home();
+                return InputAction::None;
+            }
+            KeyCode::End => {
+                app.select_end();
+                return InputAction::None;
+            }
+            _ => {}
+        }
+    }
+
+    let is_super = key.modifiers.contains(KeyModifiers::SUPER);
+    if is_super || key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('c') => {
+                if let Some(text) = app.copy_input_selection() {
+                    crate::tui::app::copy_to_clipboard(&text);
+                    return InputAction::None;
+                }
+            }
+            KeyCode::Char('x') => {
+                if let Some(text) = app.copy_input_selection() {
+                    crate::tui::app::copy_to_clipboard(&text);
+                    app.delete_input_selection();
+                    return InputAction::None;
+                }
+            }
+            KeyCode::Char('a') => {
+                app.select_all_input();
+                return InputAction::None;
+            }
+            _ => {}
+        }
+    }
+
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
             KeyCode::Char('t') => return InputAction::CycleThinkingLevel,
-            KeyCode::Char('a') => {
-                app.move_cursor_home();
-                return InputAction::None;
-            }
             KeyCode::Char('e') => {
                 return InputAction::OpenExternalEditor;
             }
@@ -225,12 +327,14 @@ pub(super) fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
     if app.is_streaming {
         return match key.code {
             KeyCode::Up => {
+                app.clear_input_selection();
                 if !app.move_cursor_up() {
                     app.history_prev();
                 }
                 InputAction::None
             }
             KeyCode::Down => {
+                app.clear_input_selection();
                 if !app.move_cursor_down() {
                     app.history_next();
                 }
@@ -246,6 +350,7 @@ pub(super) fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
             }
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 if !app.input.is_empty() {
+                    app.delete_input_selection();
                     app.insert_char('\n');
                 }
                 InputAction::None
@@ -254,18 +359,22 @@ pub(super) fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
             KeyCode::Char(c) => handle_char_input(app, c),
             KeyCode::Backspace => handle_backspace(app),
             KeyCode::Left => {
+                app.clear_input_selection();
                 app.move_cursor_left();
                 InputAction::None
             }
             KeyCode::Right => {
+                app.clear_input_selection();
                 app.move_cursor_right();
                 InputAction::None
             }
             KeyCode::Home => {
+                app.clear_input_selection();
                 app.move_cursor_home();
                 InputAction::None
             }
             KeyCode::End => {
+                app.clear_input_selection();
                 app.move_cursor_end();
                 InputAction::None
             }
@@ -277,18 +386,21 @@ pub(super) fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
         KeyCode::Esc => InputAction::None,
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
             if !app.input.is_empty() {
+                app.delete_input_selection();
                 app.insert_char('\n');
             }
             InputAction::None
         }
         KeyCode::Enter => handle_send(app),
         KeyCode::Up => {
+            app.clear_input_selection();
             if !app.move_cursor_up() {
                 app.history_prev();
             }
             InputAction::None
         }
         KeyCode::Down => {
+            app.clear_input_selection();
             if !app.move_cursor_down() {
                 app.history_next();
             }
@@ -306,18 +418,22 @@ pub(super) fn handle_simple(app: &mut App, key: KeyEvent) -> InputAction {
         KeyCode::Char(c) => handle_char_input(app, c),
         KeyCode::Backspace => handle_backspace(app),
         KeyCode::Left => {
+            app.clear_input_selection();
             app.move_cursor_left();
             InputAction::None
         }
         KeyCode::Right => {
+            app.clear_input_selection();
             app.move_cursor_right();
             InputAction::None
         }
         KeyCode::Home => {
+            app.clear_input_selection();
             app.move_cursor_home();
             InputAction::None
         }
         KeyCode::End => {
+            app.clear_input_selection();
             app.move_cursor_end();
             InputAction::None
         }
@@ -370,6 +486,7 @@ fn handle_send(app: &mut App) -> InputAction {
 }
 
 fn handle_char_input(app: &mut App, c: char) -> InputAction {
+    app.delete_input_selection();
     app.insert_char(c);
     if app.input == "/" {
         if app.command_palette.entries.is_empty() {
@@ -398,6 +515,9 @@ fn handle_char_input(app: &mut App, c: char) -> InputAction {
 }
 
 fn handle_backspace(app: &mut App) -> InputAction {
+    if app.delete_input_selection() {
+        return update_command_palette(app);
+    }
     if let Some(chip_idx) = app.chip_at_cursor() {
         app.delete_chip(chip_idx);
     } else if let Some(pb_idx) = app.paste_block_at_cursor() {
@@ -405,6 +525,10 @@ fn handle_backspace(app: &mut App) -> InputAction {
     } else {
         app.delete_char_before();
     }
+    update_command_palette(app)
+}
+
+fn update_command_palette(app: &mut App) -> InputAction {
     if app.input.starts_with('/') && !app.input.is_empty() {
         if !app.command_palette.visible {
             if app.command_palette.entries.is_empty() {

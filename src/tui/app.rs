@@ -243,6 +243,7 @@ pub struct BackgroundSubagentInfo {
     pub tools_completed: usize,
     pub done: bool,
     pub started: Instant,
+    pub finished_at: Option<Instant>,
     pub current_tool: Option<String>,
     pub current_tool_detail: Option<String>,
     pub tool_history: Vec<SubagentToolEntry>,
@@ -289,6 +290,7 @@ pub struct LayoutRects {
     pub login_popup: Option<Rect>,
     pub welcome_screen: Option<Rect>,
     pub aside_popup: Option<Rect>,
+    pub subagent_panel: Option<Rect>,
 }
 
 pub struct RenderCache {
@@ -323,6 +325,7 @@ pub struct App {
     pub messages: Vec<ChatMessage>,
     pub input: String,
     pub cursor_pos: usize,
+    pub input_selection: Option<(usize, usize)>,
     pub scroll_offset: u32,
     pub max_scroll: u32,
     pub is_streaming: bool,
@@ -394,6 +397,7 @@ pub struct App {
     pub chips: Vec<InputChip>,
     pub active_subagent: Option<SubagentState>,
     pub background_subagents: Vec<BackgroundSubagentInfo>,
+    pub subagent_panel_expanded: bool,
 
     pub render_dirty: bool,
     pub render_cache: Option<RenderCache>,
@@ -427,6 +431,7 @@ impl App {
             messages: Vec::new(),
             input: String::new(),
             cursor_pos: 0,
+            input_selection: None,
             scroll_offset: 0,
             max_scroll: 0,
             is_streaming: false,
@@ -492,6 +497,7 @@ impl App {
             chips: Vec::new(),
             active_subagent: None,
             background_subagents: Vec::new(),
+            subagent_panel_expanded: false,
             render_dirty: true,
             render_cache: None,
             message_cache: None,
@@ -652,6 +658,10 @@ impl App {
                 self.last_input_tokens = usage.input_tokens;
                 self.usage.input_tokens += usage.input_tokens;
                 self.usage.output_tokens += usage.output_tokens;
+                if self.auto_opened_thinking && self.thinking_collapse_at.is_none() {
+                    self.thinking_expanded = false;
+                    self.auto_opened_thinking = false;
+                }
                 self.scroll_to_bottom();
             }
             AgentEvent::Error(msg) => {
@@ -726,6 +736,7 @@ impl App {
                         tools_completed: 0,
                         done: false,
                         started: Instant::now(),
+                        finished_at: None,
                         current_tool: None,
                         current_tool_detail: None,
                         tool_history: Vec::new(),
@@ -804,6 +815,7 @@ impl App {
             } => {
                 if let Some(bg) = self.background_subagents.iter_mut().find(|b| b.id == id) {
                     bg.done = true;
+                    bg.finished_at = Some(Instant::now());
                 }
                 self.status_message = Some(StatusMessage::success(format!(
                     "Background subagent done: {}",
@@ -989,6 +1001,7 @@ impl App {
     }
 
     pub fn handle_paste(&mut self, text: String) {
+        self.delete_input_selection();
         let line_count = text.lines().count();
         let start = self.cursor_pos.min(self.input.len());
         let len = text.len();
@@ -1247,6 +1260,84 @@ impl App {
             self.input.remove(self.cursor_pos);
             self.adjust_chips(self.cursor_pos, prev, 0);
         }
+    }
+
+    pub fn clear_input_selection(&mut self) {
+        self.input_selection = None;
+    }
+
+    pub fn input_selection_range(&self) -> Option<(usize, usize)> {
+        let (anchor, _) = self.input_selection?;
+        let start = anchor.min(self.cursor_pos);
+        let end = anchor.max(self.cursor_pos);
+        if start == end {
+            return None;
+        }
+        Some((start, end))
+    }
+
+    pub fn copy_input_selection(&self) -> Option<String> {
+        let (start, end) = self.input_selection_range()?;
+        Some(self.input[start..end].to_string())
+    }
+
+    pub fn delete_input_selection(&mut self) -> bool {
+        let Some((start, end)) = self.input_selection_range() else {
+            return false;
+        };
+        let old_len = end - start;
+        self.input.replace_range(start..end, "");
+        self.adjust_chips(start, old_len, 0);
+        self.cursor_pos = start;
+        self.input_selection = None;
+        true
+    }
+
+    pub fn select_left(&mut self) {
+        if self.input_selection.is_none() {
+            self.input_selection = Some((self.cursor_pos, self.cursor_pos));
+        }
+        if self.cursor_pos > 0 {
+            let prev = self.input[..self.cursor_pos]
+                .chars()
+                .last()
+                .map(|c| c.len_utf8())
+                .unwrap_or(0);
+            self.cursor_pos -= prev;
+        }
+    }
+
+    pub fn select_right(&mut self) {
+        if self.input_selection.is_none() {
+            self.input_selection = Some((self.cursor_pos, self.cursor_pos));
+        }
+        if self.cursor_pos < self.input.len() {
+            let next = self.input[self.cursor_pos..]
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(0);
+            self.cursor_pos += next;
+        }
+    }
+
+    pub fn select_home(&mut self) {
+        if self.input_selection.is_none() {
+            self.input_selection = Some((self.cursor_pos, self.cursor_pos));
+        }
+        self.cursor_pos = 0;
+    }
+
+    pub fn select_end(&mut self) {
+        if self.input_selection.is_none() {
+            self.input_selection = Some((self.cursor_pos, self.cursor_pos));
+        }
+        self.cursor_pos = self.input.len();
+    }
+
+    pub fn select_all_input(&mut self) {
+        self.input_selection = Some((0, 0));
+        self.cursor_pos = self.input.len();
     }
 
     pub fn move_cursor_left(&mut self) {

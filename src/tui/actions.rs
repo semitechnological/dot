@@ -695,29 +695,72 @@ pub async fn dispatch_action(
                 Ok(conv) => {
                     let title = conv.title.clone();
                     let conv_model = conv.model.clone();
-                    let messages_for_ui: Vec<(String, String)> = conv
+                    let messages_for_ui: Vec<_> = conv
                         .messages
                         .iter()
-                        .map(|m| (m.role.clone(), m.content.clone()))
+                        .map(|m| {
+                            let db_tcs = agent_lock.get_tool_calls(&m.id).unwrap_or_default();
+                            (m.role.clone(), m.content.clone(), db_tcs)
+                        })
                         .collect();
                     match agent_lock.resume_conversation(&conv) {
                         Ok(()) => {
                             drop(agent_lock);
                             app.clear_conversation();
                             app.conversation_title = title;
-                            for (role, content) in messages_for_ui {
+                            for (role, content, db_tcs) in messages_for_ui {
                                 let model = if role == "assistant" {
                                     Some(conv_model.clone())
                                 } else {
                                     None
                                 };
+                                let tool_calls: Vec<crate::tui::tools::ToolCallDisplay> = db_tcs
+                                    .into_iter()
+                                    .map(|tc| {
+                                        let category =
+                                            crate::tui::tools::ToolCategory::from_name(&tc.name);
+                                        let detail = crate::tui::tools::extract_tool_detail(
+                                            &tc.name, &tc.input,
+                                        );
+                                        crate::tui::tools::ToolCallDisplay {
+                                            name: tc.name,
+                                            input: tc.input,
+                                            output: tc.output,
+                                            is_error: tc.is_error,
+                                            category,
+                                            detail,
+                                        }
+                                    })
+                                    .collect();
+                                let has_tools = !tool_calls.is_empty();
+                                let clean_content = if has_tools {
+                                    content.replace("[tool use]", "").trim().to_string()
+                                } else {
+                                    content
+                                };
+                                let segments = if has_tools {
+                                    let mut segs = Vec::new();
+                                    if !clean_content.is_empty() {
+                                        segs.push(crate::tui::tools::StreamSegment::Text(
+                                            clean_content.clone(),
+                                        ));
+                                    }
+                                    for tc in &tool_calls {
+                                        segs.push(crate::tui::tools::StreamSegment::ToolCall(
+                                            tc.clone(),
+                                        ));
+                                    }
+                                    Some(segs)
+                                } else {
+                                    None
+                                };
                                 app.messages.push(ChatMessage {
                                     role,
-                                    content,
-                                    tool_calls: Vec::new(),
+                                    content: clean_content,
+                                    tool_calls,
                                     thinking: None,
                                     model,
-                                    segments: None,
+                                    segments,
                                     chips: None,
                                 });
                             }

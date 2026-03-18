@@ -222,19 +222,17 @@ pub(super) fn handle_file_picker(app: &mut App, key: KeyEvent) -> InputAction {
         }
         KeyCode::Enter | KeyCode::Tab => {
             if let Some(entry) = app.file_picker.confirm() {
+                let start = app.file_picker.at_pos.min(app.input.len());
+                let end = app.cursor_pos.min(app.input.len()).max(start);
                 if entry.is_dir {
                     let new_query = format!("{}/", entry.path);
-                    let start = app.file_picker.at_pos;
-                    let end = app.cursor_pos;
-                    app.input
-                        .replace_range(start..end, &format!("@{}", new_query));
-                    app.cursor_pos = start + 1 + new_query.len();
+                    let replacement = format!("@{}", new_query);
+                    app.input.replace_range(start..end, &replacement);
+                    app.cursor_pos = start + replacement.len();
                     app.file_picker.open(start);
                     app.file_picker.update_query(&new_query);
                 } else {
                     let path = entry.path;
-                    let start = app.file_picker.at_pos;
-                    let end = app.cursor_pos;
                     let text = format!("@{} ", path);
                     let old_len = end - start;
                     app.input.replace_range(start..end, &text);
@@ -253,10 +251,14 @@ pub(super) fn handle_file_picker(app: &mut App, key: KeyEvent) -> InputAction {
         KeyCode::Backspace => {
             app.delete_char_before();
             let at_pos = app.file_picker.at_pos;
-            if app.cursor_pos <= at_pos {
+            let query_start = at_pos + 1;
+            if app.cursor_pos <= at_pos
+                || query_start > app.input.len()
+                || query_start > app.cursor_pos
+            {
                 app.file_picker.close();
             } else {
-                let query = app.input[at_pos + 1..app.cursor_pos].to_string();
+                let query = app.input[query_start..app.cursor_pos].to_string();
                 app.file_picker.update_query(&query);
                 if app.file_picker.filtered.is_empty() {
                     app.file_picker.close();
@@ -267,10 +269,15 @@ pub(super) fn handle_file_picker(app: &mut App, key: KeyEvent) -> InputAction {
         KeyCode::Char(c) => {
             app.insert_char(c);
             let at_pos = app.file_picker.at_pos;
-            let query = app.input[at_pos + 1..app.cursor_pos].to_string();
-            app.file_picker.update_query(&query);
-            if app.file_picker.filtered.is_empty() {
+            let query_start = at_pos + 1;
+            if query_start > app.input.len() || query_start > app.cursor_pos {
                 app.file_picker.close();
+            } else {
+                let query = app.input[query_start..app.cursor_pos].to_string();
+                app.file_picker.update_query(&query);
+                if app.file_picker.filtered.is_empty() {
+                    app.file_picker.close();
+                }
             }
             InputAction::None
         }

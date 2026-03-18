@@ -1,6 +1,6 @@
 <div align="center">
     <h3>dot</h3>
-    <p>A minimal AI agent that lives in your terminal</p>
+    <p>A fast, minimal AI agent that lives in your terminal</p>
     <br/>
     <br/>
 </div>

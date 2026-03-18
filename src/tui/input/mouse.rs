@@ -275,8 +275,8 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> InputAction {
                         app.file_picker.selected = relative_row;
                         if let Some(entry) = app.file_picker.confirm() {
                             let path = entry.path;
-                            let start = app.file_picker.at_pos;
-                            let end = app.cursor_pos;
+                            let start = app.file_picker.at_pos.min(app.input.len());
+                            let end = app.cursor_pos.min(app.input.len()).max(start);
                             let text = format!("@{} ", path);
                             let old_len = end - start;
                             app.input.replace_range(start..end, &text);

@@ -392,6 +392,9 @@ impl Agent {
     pub fn get_session(&self, id: &str) -> Result<crate::db::Conversation> {
         self.db.get_conversation(id)
     }
+    pub fn get_tool_calls(&self, message_id: &str) -> Result<Vec<crate::db::DbToolCall>> {
+        self.db.get_tool_calls(message_id)
+    }
     pub fn conversation_title(&self) -> Option<String> {
         self.db
             .get_conversation(&self.conversation_id)

@@ -87,7 +87,7 @@ fn render_tool_calls_inner(
                 "\u{251c}\u{2500} "
             }
         } else {
-            "  "
+            ""
         };
 
         if expanded {
@@ -233,8 +233,8 @@ fn render_expanded_output(
     tool_key: Option<(usize, usize)>,
 ) {
     let compact = ctx.compact;
-    let indent: &str = if compact { "  " } else { "    " };
-    let indent_len: u16 = if compact { 2 } else { 4 };
+    let indent: &str = if compact { "" } else { " " };
+    let indent_len: u16 = if compact { 0 } else { 1 };
     let code_width = ctx.width.saturating_sub(indent_len);
 
     if code_width < 10 {

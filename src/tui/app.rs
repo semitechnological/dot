@@ -965,8 +965,12 @@ impl App {
 
     pub fn handle_paste(&mut self, text: String) {
         let line_count = text.lines().count();
-        let start = self.cursor_pos;
+        let start = self.cursor_pos.min(self.input.len());
         let len = text.len();
+        if !self.input.is_char_boundary(start) {
+            self.cursor_pos = self.input.len();
+            return;
+        }
         self.input.insert_str(start, &text);
         self.adjust_chips(start, 0, len);
         self.cursor_pos = start + len;
@@ -987,9 +991,11 @@ impl App {
 
     pub fn delete_paste_block(&mut self, idx: usize) {
         let pb = self.paste_blocks.remove(idx);
-        let len = pb.end - pb.start;
-        self.input.replace_range(pb.start..pb.end, "");
-        self.cursor_pos = pb.start;
+        let start = pb.start.min(self.input.len());
+        let end = pb.end.min(self.input.len()).max(start);
+        let len = end - start;
+        self.input.replace_range(start..end, "");
+        self.cursor_pos = start;
         for remaining in &mut self.paste_blocks {
             if remaining.start >= pb.end {
                 remaining.start -= len;
@@ -1006,10 +1012,12 @@ impl App {
 
     pub fn delete_chip(&mut self, idx: usize) {
         let chip = self.chips.remove(idx);
-        let len = chip.end - chip.start;
-        self.input.replace_range(chip.start..chip.end, "");
-        self.cursor_pos = chip.start;
-        self.adjust_chips(chip.start, len, 0);
+        let start = chip.start.min(self.input.len());
+        let end = chip.end.min(self.input.len()).max(start);
+        let len = end - start;
+        self.input.replace_range(start..end, "");
+        self.cursor_pos = start;
+        self.adjust_chips(start, len, 0);
     }
 
     pub fn adjust_chips(&mut self, edit_start: usize, old_len: usize, new_len: usize) {
@@ -1185,15 +1193,24 @@ impl App {
     }
 
     pub fn insert_char(&mut self, c: char) {
-        let pos = self.cursor_pos;
+        let pos = self.cursor_pos.min(self.input.len());
+        if !self.input.is_char_boundary(pos) {
+            self.cursor_pos = self.input.len();
+            return;
+        }
         self.input.insert(pos, c);
         let len = c.len_utf8();
         self.adjust_chips(pos, 0, len);
-        self.cursor_pos += len;
+        self.cursor_pos = pos + len;
     }
 
     pub fn delete_char_before(&mut self) {
+        self.cursor_pos = self.cursor_pos.min(self.input.len());
         if self.cursor_pos > 0 {
+            if !self.input.is_char_boundary(self.cursor_pos) {
+                self.cursor_pos = self.input.len();
+                return;
+            }
             let prev = self.input[..self.cursor_pos]
                 .chars()
                 .last()

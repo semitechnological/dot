@@ -204,6 +204,8 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .areas(area);
 
+    app.layout.messages = content_area;
+
     let lpad: u16 = if is_compact(content_area.width) { 0 } else { 1 };
     let inner = Rect {
         x: content_area.x + lpad,

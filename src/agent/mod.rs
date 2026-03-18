@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::db::Db;
 use crate::extension::{Event, EventContext, HookRegistry, HookResult};
 use crate::memory::MemoryStore;
-use crate::provider::{ContentBlock, Message, Provider, Role, StreamEventType, Usage};
+use crate::provider::{ContentBlock, Message, Provider, Role, StopReason, StreamEventType, Usage};
 use crate::tools::ToolRegistry;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -671,6 +671,9 @@ impl Agent {
             None
         };
         let mut final_usage: Option<Usage> = None;
+        let mut total_text = String::new();
+        let mut continuations = 0usize;
+        const MAX_CONTINUATIONS: usize = 10;
         let mut system_prompt = self
             .agents_context
             .apply_to_system_prompt(&self.profile().system_prompt);
@@ -819,6 +822,7 @@ impl Agent {
                 &Event::OnStreamStart,
                 &self.event_context(&Event::OnStreamStart),
             );
+            let mut stop_reason = StopReason::EndTurn;
             let mut stream_rx = self
                 .provider()
                 .stream(
@@ -883,9 +887,10 @@ impl Agent {
                         current_tool_input.clear();
                     }
                     StreamEventType::MessageEnd {
-                        stop_reason: _,
+                        stop_reason: sr,
                         usage,
                     } => {
+                        stop_reason = sr;
                         self.last_input_tokens = usage.input_tokens;
                         let _ = self
                             .db
@@ -896,6 +901,8 @@ impl Agent {
                     _ => {}
                 }
             }
+
+            total_text.push_str(&full_text);
 
             let mut content_blocks: Vec<ContentBlock> = Vec::new();
             if let Some(ref summary) = compaction_content {
@@ -947,7 +954,19 @@ impl Agent {
             }
             self.snapshots.checkpoint();
             if tool_calls.is_empty() {
-                let _ = event_tx.send(AgentEvent::TextComplete(full_text));
+                if matches!(stop_reason, StopReason::MaxTokens) && continuations < MAX_CONTINUATIONS
+                {
+                    continuations += 1;
+                    tracing::info!(
+                        "max_tokens reached, continuing ({continuations}/{MAX_CONTINUATIONS})"
+                    );
+                    self.messages.push(Message {
+                        role: Role::User,
+                        content: vec![ContentBlock::Text("Continue".to_string())],
+                    });
+                    continue;
+                }
+                let _ = event_tx.send(AgentEvent::TextComplete(total_text.clone()));
                 if let Some(usage) = final_usage {
                     let _ = event_tx.send(AgentEvent::Done { usage });
                 }

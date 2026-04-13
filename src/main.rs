@@ -252,7 +252,7 @@ async fn main() -> Result<()> {
                 } else {
                     None
                 };
-                let providers = build_providers(&config, &creds)?;
+                let providers = build_providers(&config, &creds, true)?;
                 let (tools, skill_names) = build_tool_registry(&config);
                 let profiles = build_agent_profiles(&config);
                 let hooks = build_hooks(&config);
@@ -323,7 +323,7 @@ async fn run_headless(
     } else {
         None
     };
-    let providers = build_providers(&config, &creds)?;
+    let providers = build_providers(&config, &creds, false)?;
     let (tools, skill_names) = build_tool_registry(&config);
     let profiles = build_agent_profiles(&config);
     let hooks = build_hooks(&config);
@@ -510,6 +510,7 @@ fn build_copilot(
 fn build_providers(
     config: &dot::config::Config,
     creds: &dot::auth::Credentials,
+    allow_dummy: bool,
 ) -> Result<Vec<Box<dyn dot::provider::Provider>>> {
     let model = config.default_model.clone();
     let mut providers: Vec<Box<dyn dot::provider::Provider>> = Vec::new();
@@ -581,10 +582,14 @@ fn build_providers(
     }
 
     if providers.is_empty() {
-        bail!(
-            "No credentials found.\n\
-             Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or run `dot login`."
-        );
+        if allow_dummy {
+            providers.push(Box::new(dot::provider::dummy::DummyProvider::new()));
+        } else {
+            bail!(
+                "No credentials found.\n\
+                 Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or run `dot login`."
+            );
+        }
     }
 
     Ok(providers)

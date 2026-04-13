@@ -18,6 +18,19 @@ use crate::tui::widgets::{
 type ModelFetchReceiver =
     tokio::sync::oneshot::Receiver<(Vec<(String, Vec<String>)>, String, String)>;
 
+fn default_use_crepus_ui() -> bool {
+    #[cfg(feature = "crepus-ui")]
+    {
+        std::env::var("DOT_UI_BACKEND")
+            .map(|v| !v.eq_ignore_ascii_case("legacy"))
+            .unwrap_or(true)
+    }
+    #[cfg(not(feature = "crepus-ui"))]
+    {
+        false
+    }
+}
+
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
@@ -508,9 +521,7 @@ impl App {
             input_at_top: false,
             cached_model_groups: None,
             model_fetch_rx: None,
-            use_crepus_ui: std::env::var("DOT_UI_BACKEND")
-                .map(|v| v.eq_ignore_ascii_case("crepus"))
-                .unwrap_or(false),
+            use_crepus_ui: default_use_crepus_ui(),
             cursor_shape,
             cursor_blink,
             cursor_shape_normal,

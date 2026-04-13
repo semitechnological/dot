@@ -44,15 +44,11 @@ impl Provider for DummyProvider {
         0
     }
 
-    fn fetch_context_window(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<u32>> + Send + '_>> {
+    fn fetch_context_window(&self) -> Pin<Box<dyn Future<Output = Result<u32>> + Send + '_>> {
         Box::pin(async { Ok(0) })
     }
 
-    fn fetch_models(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>>> + Send + '_>> {
+    fn fetch_models(&self) -> Pin<Box<dyn Future<Output = Result<Vec<String>>> + Send + '_>> {
         Box::pin(async { Ok(vec!["setup-required".to_string()]) })
     }
 

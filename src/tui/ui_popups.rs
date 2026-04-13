@@ -9,6 +9,30 @@ use crate::tui::widgets::{
     COMMANDS, LoginPopup, LoginStep, PaletteEntryKind, ThinkingLevel, WelcomeScreen,
 };
 
+#[cfg(feature = "crepus-ui")]
+fn normalize_crepus_text(raw: &str) -> String {
+    raw.replace(['\n', '\r'], " ")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('{', "｛")
+        .replace('}', "｝")
+}
+
+#[cfg(feature = "crepus-ui")]
+fn render_crepus_popup(frame: &mut Frame, area: Rect, title: &str, lines: &[String]) {
+    frame.render_widget(Clear, area);
+    let mut tpl = String::from("div w-full h-full flex flex-col border border-zinc-700 text-zinc-100 p-1\n");
+    tpl.push_str(&format!(
+        "  div text-zinc-400 text-xs \"\u{2500} {}\"\n",
+        normalize_crepus_text(title)
+    ));
+    for line in lines {
+        tpl.push_str(&format!("  div \"{}\"\n", normalize_crepus_text(line)));
+    }
+    let ctx = crepuscularity_tui::TemplateContext::new();
+    let _ = crepuscularity_tui::render_template(&tpl, &ctx, frame, area);
+}
+
 fn popup_block(title: &str, _accent: Color, _muted: Color) -> Block<'static> {
     let line = Line::from(vec![
         Span::styled("\u{2500} ", Style::default().fg(Color::Indexed(8))),
@@ -40,6 +64,17 @@ fn popup_rect(area: Rect) -> Rect {
 }
 
 pub fn draw_model_selector(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let mut lines = vec![format!("query: {}", app.model_selector.query)];
+        for &idx in app.model_selector.filtered.iter().take(12) {
+            let entry = &app.model_selector.entries[idx];
+            lines.push(format!("{} / {}", entry.provider, entry.model));
+        }
+        render_crepus_popup(frame, popup_rect(frame.area()), "model", &lines);
+        return;
+    }
+
     let sel = &app.model_selector;
     if sel.filtered.is_empty() && sel.query.is_empty() {
         return;
@@ -141,6 +176,19 @@ pub fn draw_model_selector(frame: &mut Frame, app: &mut App) {
 }
 
 pub fn draw_agent_selector(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let lines: Vec<String> = app
+            .agent_selector
+            .entries
+            .iter()
+            .take(16)
+            .map(|e| format!("{} - {}", e.name, e.description))
+            .collect();
+        render_crepus_popup(frame, popup_rect(frame.area()), "agent", &lines);
+        return;
+    }
+
     let sel = &app.agent_selector;
     if sel.entries.is_empty() {
         return;
@@ -192,6 +240,22 @@ pub fn draw_agent_selector(frame: &mut Frame, app: &mut App) {
 }
 
 pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let lines: Vec<String> = app
+            .command_palette
+            .filtered
+            .iter()
+            .take(12)
+            .map(|&idx| {
+                let entry = &app.command_palette.entries[idx];
+                format!("/{} - {}", entry.name, entry.description)
+            })
+            .collect();
+        render_crepus_popup(frame, input_area, "commands", &lines);
+        return;
+    }
+
     let palette = &app.command_palette;
     if palette.filtered.is_empty() {
         app.layout.command_palette = None;
@@ -328,6 +392,16 @@ pub fn draw_empty_state(app: &App, width: u16, height: u16) -> Vec<Line<'static>
 }
 
 pub fn draw_thinking_selector(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let lines: Vec<String> = ThinkingLevel::all()
+            .iter()
+            .map(|level| format!("{} - {}", level.label(), level.description()))
+            .collect();
+        render_crepus_popup(frame, popup_rect(frame.area()), "thinking", &lines);
+        return;
+    }
+
     let sel = &app.thinking_selector;
     if !sel.visible {
         return;
@@ -384,6 +458,19 @@ pub fn draw_thinking_selector(frame: &mut Frame, app: &mut App) {
 }
 
 pub fn draw_help_popup(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let mut lines = vec![
+            "/help - show commands".to_string(),
+            "/quit - exit the app".to_string(),
+        ];
+        if app.vim_mode {
+            lines.push("vim navigation enabled".to_string());
+        }
+        render_crepus_popup(frame, popup_rect(frame.area()), "help", &lines);
+        return;
+    }
+
     let mut content_lines: Vec<Line<'static>> = Vec::new();
 
     let heading = Style::default().add_modifier(Modifier::BOLD);
@@ -475,6 +562,17 @@ pub fn draw_help_popup(frame: &mut Frame, app: &mut App) {
 }
 
 pub fn draw_session_selector(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let mut lines = vec![format!("query: {}", app.session_selector.query)];
+        for &idx in app.session_selector.filtered.iter().take(12) {
+            let entry = &app.session_selector.entries[idx];
+            lines.push(format!("{} - {}", entry.title, entry.subtitle));
+        }
+        render_crepus_popup(frame, popup_rect(frame.area()), "sessions", &lines);
+        return;
+    }
+
     let sel = &app.session_selector;
     if !sel.visible {
         return;
@@ -552,6 +650,21 @@ pub fn draw_session_selector(frame: &mut Frame, app: &mut App) {
 }
 
 pub fn draw_context_menu(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let lines: Vec<String> = crate::tui::widgets::MessageContextMenu::labels()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        render_crepus_popup(
+            frame,
+            Rect::new(app.context_menu.screen_x, app.context_menu.screen_y, 26, 6),
+            "menu",
+            &lines,
+        );
+        return;
+    }
+
     let menu = &app.context_menu;
     if !menu.visible {
         return;
@@ -599,6 +712,15 @@ pub fn draw_context_menu(frame: &mut Frame, app: &mut App) {
 }
 
 pub fn draw_question_popup(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui && let Some(pq) = app.pending_question.as_ref() {
+        let mut lines = vec![pq.question.clone()];
+        lines.extend(pq.options.iter().cloned());
+        lines.push(format!("custom: {}", pq.custom_input));
+        render_crepus_popup(frame, popup_rect(frame.area()), "question", &lines);
+        return;
+    }
+
     let pq = match app.pending_question.as_ref() {
         Some(q) => q,
         None => return,
@@ -666,6 +788,13 @@ pub fn draw_question_popup(frame: &mut Frame, app: &mut App) {
 }
 
 pub fn draw_permission_popup(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui && let Some(p) = app.pending_permission.as_ref() {
+        let lines = vec![p.tool_name.clone(), p.input_summary.clone()];
+        render_crepus_popup(frame, popup_rect(frame.area()), "permission", &lines);
+        return;
+    }
+
     let pp = match app.pending_permission.as_ref() {
         Some(p) => p,
         None => return,
@@ -719,6 +848,12 @@ pub fn draw_permission_popup(frame: &mut Frame, app: &mut App) {
 }
 
 pub fn draw_rename_popup(frame: &mut Frame, app: &App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        render_crepus_popup(frame, centered_popup(frame.area(), 48, 5), "rename", std::slice::from_ref(&app.rename_input));
+        return;
+    }
+
     let footer = "enter save  esc cancel";
     let display = format!("{}\u{258f}", app.rename_input);
     let content_lines: Vec<Line<'static>> = vec![Line::from(vec![
@@ -741,6 +876,17 @@ pub fn draw_rename_popup(frame: &mut Frame, app: &App) {
 }
 
 pub fn draw_file_picker(frame: &mut Frame, app: &mut App, input_area: Rect) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let mut lines = vec![format!("query: {}", app.file_picker.query)];
+        for &idx in app.file_picker.filtered.iter().take(12) {
+            let entry = &app.file_picker.entries[idx];
+            lines.push(entry.path.clone());
+        }
+        render_crepus_popup(frame, input_area, "files", &lines);
+        return;
+    }
+
     let picker = &app.file_picker;
     if picker.filtered.is_empty() {
         app.layout.file_picker = None;
@@ -815,6 +961,82 @@ pub fn draw_file_picker(frame: &mut Frame, app: &mut App, input_area: Rect) {
 }
 
 pub fn draw_login_popup(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let lp = &app.login_popup;
+        let (title, hint) = match lp.step {
+            LoginStep::SelectProvider => (
+                "login",
+                "esc cancel  ↑↓ navigate  enter select",
+            ),
+            LoginStep::SelectMethod => (
+                "anthropic",
+                "esc back  ↑↓ navigate  enter select",
+            ),
+            LoginStep::EnterApiKey => ("enter api key", "esc back  enter submit"),
+            LoginStep::OAuthWaiting => ("authorize", "esc cancel  enter submit code"),
+            LoginStep::OAuthExchanging => ("exchanging...", "esc cancel"),
+        };
+
+        let mut lines: Vec<String> = vec![String::new()];
+
+        if lp.step == LoginStep::OAuthWaiting {
+            lines.push("  browser opened for authorization".to_string());
+            lines.push(String::new());
+            lines.push("  paste the URL or code after authorizing:".to_string());
+            lines.push(String::new());
+            let display = if lp.code_input.is_empty() {
+                "paste code here...".to_string()
+            } else if lp.code_input.len() > 40 {
+                format!("{}...", &lp.code_input[..37])
+            } else {
+                lp.code_input.clone()
+            };
+            lines.push(format!("  › {}", display));
+        } else if lp.step == LoginStep::OAuthExchanging {
+            lines.push("  exchanging code for credentials...".to_string());
+        } else if lp.step == LoginStep::EnterApiKey {
+            let provider = lp.provider.as_deref().unwrap_or("provider");
+            lines.push(format!("  {} API key", provider));
+            lines.push(String::new());
+            let masked = "•".repeat(lp.key_input.len());
+            lines.push(format!(
+                "  › {}",
+                if masked.is_empty() {
+                    "paste or type your key...".to_string()
+                } else {
+                    masked
+                }
+            ));
+        } else {
+            let items: Vec<(&str, bool)> = match lp.step {
+                LoginStep::SelectProvider => LoginPopup::providers()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| (*p, i == lp.selected))
+                    .collect(),
+                LoginStep::SelectMethod => LoginPopup::anthropic_methods()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, m)| (*m, i == lp.selected))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            for (label, selected) in &items {
+                if *selected {
+                    lines.push(format!("  › {}", label));
+                } else {
+                    lines.push(format!("    {}", label));
+                }
+            }
+        }
+
+        lines.push(String::new());
+        lines.push(format!("  {}", hint));
+        render_crepus_popup(frame, popup_rect(frame.area()), title, &lines);
+        return;
+    }
+
     let lp = &app.login_popup;
     let accent = app.theme.accent;
     let muted = app.theme.muted_fg;
@@ -945,6 +1167,16 @@ pub fn draw_login_popup(frame: &mut Frame, app: &mut App) {
 }
 
 pub fn draw_welcome_screen(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let lines = WelcomeScreen::choices()
+            .iter()
+            .map(|(label, desc)| format!("{} - {}", label, desc))
+            .collect::<Vec<_>>();
+        render_crepus_popup(frame, centered_popup(frame.area(), 54, lines.len() + 4), "welcome", &lines);
+        return;
+    }
+
     let accent = app.theme.accent;
     let muted = app.theme.muted_fg;
     let dim = Style::default().fg(Color::Indexed(8));
@@ -1019,6 +1251,16 @@ pub fn draw_welcome_screen(frame: &mut Frame, app: &mut App) {
 }
 
 pub fn draw_aside_popup(frame: &mut Frame, app: &mut App) {
+    #[cfg(feature = "crepus-ui")]
+    if app.use_crepus_ui {
+        let lines = vec![
+            app.aside_popup.question.clone(),
+            app.aside_popup.response.clone(),
+        ];
+        render_crepus_popup(frame, centered_popup(frame.area(), 80, 18), "aside", &lines);
+        return;
+    }
+
     let accent = app.theme.accent;
     let muted = app.theme.muted_fg;
     let full = frame.area();

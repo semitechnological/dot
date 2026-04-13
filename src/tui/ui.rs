@@ -30,6 +30,7 @@ fn normalize_crepus_text(raw: &str) -> String {
 }
 
 #[cfg(feature = "crepus-ui")]
+#[allow(dead_code)]
 fn build_crepus_shell_template(app: &App) -> String {
     let title = normalize_crepus_text(
         app.conversation_title
@@ -331,6 +332,7 @@ fn build_crepus_shell_template(app: &App) -> String {
 }
 
 #[cfg(feature = "crepus-ui")]
+#[allow(dead_code)]
 fn draw_shell_crepus(frame: &mut Frame, app: &mut App) -> bool {
     if !app.use_crepus_ui {
         return false;
@@ -351,6 +353,14 @@ fn draw_shell_crepus(frame: &mut Frame, app: &mut App) -> bool {
 fn draw_shell_crepus(_frame: &mut Frame, _app: &mut App) -> bool {
     false
 }
+
+#[cfg(feature = "crepus-ui")]
+fn draw_overlay_crepus(frame: &mut Frame, app: &mut App) {
+    let _ = (frame, app);
+}
+
+#[cfg(not(feature = "crepus-ui"))]
+fn draw_overlay_crepus(_frame: &mut Frame, _app: &mut App) {}
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.welcome_screen.visible || app.login_popup.from_welcome && app.login_popup.visible {
@@ -387,15 +397,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     };
     app.layout.status = chunks[5];
 
-    if !draw_shell_crepus(frame, app) {
-        draw_status_header(frame, app, chunks[0]);
-        draw_messages(frame, app, chunks[1]);
-        draw_input_separator(frame, app, chunks[2]);
-        draw_input(frame, app, chunks[3]);
-        render_input_selection(frame, app, chunks[3]);
-        draw_input_separator(frame, app, chunks[4]);
-        draw_token_bar(frame, app, chunks[5]);
-    }
+    draw_status_header(frame, app, chunks[0]);
+    draw_messages(frame, app, chunks[1]);
+    draw_input_separator(frame, app, chunks[2]);
+    draw_input(frame, app, chunks[3]);
+    render_input_selection(frame, app, chunks[3]);
+    draw_input_separator(frame, app, chunks[4]);
+    draw_token_bar(frame, app, chunks[5]);
 
     if app.model_selector.visible {
         ui_popups::draw_model_selector(frame, app);
@@ -448,6 +456,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.aside_popup.visible {
         ui_popups::draw_aside_popup(frame, app);
     }
+
+    draw_overlay_crepus(frame, app);
 }
 
 fn draw_status_header(frame: &mut Frame, app: &App, area: Rect) {

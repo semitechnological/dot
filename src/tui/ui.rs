@@ -72,10 +72,261 @@ fn build_crepus_shell_template(app: &App) -> String {
 
     tpl.push_str("  div border-t border-zinc-800 p-1\n");
     tpl.push_str("    div text-zinc-400 text-xs \"Input\"\n");
-    tpl.push_str(&format!("    div rounded border border-zinc-700 p-1 \"{}\"\n", input));
+    tpl.push_str(&format!(
+        "    div rounded border border-zinc-700 p-1 \"{}\"\n",
+        input
+    ));
 
     tpl.push_str("  div border-t border-zinc-800 px-1 py-0 text-zinc-500\n");
     tpl.push_str(&format!("    div \"{}\"\n", status));
+
+    if app.welcome_screen.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Welcome\"\n");
+        for (idx, (label, desc)) in crate::tui::widgets::WelcomeScreen::choices()
+            .iter()
+            .enumerate()
+        {
+            let prefix = if idx == app.welcome_screen.selected {
+                ">"
+            } else {
+                " "
+            };
+            tpl.push_str(&format!(
+                "    div \"{} {} - {}\"\n",
+                prefix,
+                normalize_crepus_text(label),
+                normalize_crepus_text(desc)
+            ));
+        }
+    }
+
+    if app.model_selector.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Models\"\n");
+        tpl.push_str(&format!(
+            "    div \"query: {}\"\n",
+            normalize_crepus_text(&app.model_selector.query)
+        ));
+        for idx in app.model_selector.filtered.iter().take(10) {
+            let entry = &app.model_selector.entries[*idx];
+            let selected = app
+                .model_selector
+                .filtered
+                .get(app.model_selector.selected)
+                .copied()
+                == Some(*idx);
+            let prefix = if selected { ">" } else { " " };
+            tpl.push_str(&format!(
+                "    div \"{} {} / {}\"\n",
+                prefix,
+                normalize_crepus_text(&entry.provider),
+                normalize_crepus_text(&entry.model)
+            ));
+        }
+    }
+
+    if app.agent_selector.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Agents\"\n");
+        for (idx, entry) in app.agent_selector.entries.iter().enumerate().take(10) {
+            let prefix = if idx == app.agent_selector.selected {
+                ">"
+            } else {
+                " "
+            };
+            tpl.push_str(&format!(
+                "    div \"{} {} - {}\"\n",
+                prefix,
+                normalize_crepus_text(&entry.name),
+                normalize_crepus_text(&entry.description)
+            ));
+        }
+    }
+
+    if app.thinking_selector.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Thinking\"\n");
+        for (idx, level) in crate::tui::widgets::ThinkingLevel::all().iter().enumerate() {
+            let prefix = if idx == app.thinking_selector.selected {
+                ">"
+            } else {
+                " "
+            };
+            tpl.push_str(&format!(
+                "    div \"{} {} - {}\"\n",
+                prefix,
+                level.label(),
+                normalize_crepus_text(level.description())
+            ));
+        }
+    }
+
+    if app.session_selector.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Sessions\"\n");
+        tpl.push_str(&format!(
+            "    div \"query: {}\"\n",
+            normalize_crepus_text(&app.session_selector.query)
+        ));
+        for idx in app.session_selector.filtered.iter().take(10) {
+            let entry = &app.session_selector.entries[*idx];
+            let selected = app
+                .session_selector
+                .filtered
+                .get(app.session_selector.selected)
+                .copied()
+                == Some(*idx);
+            let prefix = if selected { ">" } else { " " };
+            tpl.push_str(&format!(
+                "    div \"{} {} - {}\"\n",
+                prefix,
+                normalize_crepus_text(&entry.title),
+                normalize_crepus_text(&entry.subtitle)
+            ));
+        }
+    }
+
+    if app.command_palette.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Commands\"\n");
+        tpl.push_str(&format!(
+            "    div \"/{}\"\n",
+            normalize_crepus_text(app.input.trim_start_matches('/'))
+        ));
+        for &idx in app.command_palette.filtered.iter().take(10) {
+            let entry = &app.command_palette.entries[idx];
+            let prefix = if app
+                .command_palette
+                .filtered
+                .get(app.command_palette.selected)
+                .copied()
+                == Some(idx)
+            {
+                ">"
+            } else {
+                " "
+            };
+            tpl.push_str(&format!(
+                "    div \"{} /{} - {}\"\n",
+                prefix,
+                normalize_crepus_text(&entry.name),
+                normalize_crepus_text(&entry.description)
+            ));
+        }
+    }
+
+    if app.file_picker.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Files\"\n");
+        tpl.push_str(&format!(
+            "    div \"query: {}\"\n",
+            normalize_crepus_text(&app.file_picker.query)
+        ));
+        for idx in app.file_picker.filtered.iter().take(10) {
+            let entry = &app.file_picker.entries[*idx];
+            let prefix = if app
+                .file_picker
+                .filtered
+                .get(app.file_picker.selected)
+                .copied()
+                == Some(*idx)
+            {
+                ">"
+            } else {
+                " "
+            };
+            tpl.push_str(&format!(
+                "    div \"{} {}\"\n",
+                prefix,
+                normalize_crepus_text(&entry.path)
+            ));
+        }
+    }
+
+    if app.help_popup.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Help\"\n");
+        tpl.push_str("    div \"q quit /help open help /quit exits\"\n");
+    }
+
+    if app.context_menu.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Message Menu\"\n");
+        for (idx, label) in crate::tui::widgets::MessageContextMenu::labels()
+            .iter()
+            .enumerate()
+        {
+            let prefix = if idx == app.context_menu.selected {
+                ">"
+            } else {
+                " "
+            };
+            tpl.push_str(&format!(
+                "    div \"{} {}\"\n",
+                prefix,
+                normalize_crepus_text(label)
+            ));
+        }
+    }
+
+    if let Some(q) = app.pending_question.as_ref() {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Question\"\n");
+        tpl.push_str(&format!(
+            "    div \"{}\"\n",
+            normalize_crepus_text(&q.question)
+        ));
+    }
+
+    if let Some(p) = app.pending_permission.as_ref() {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Permission\"\n");
+        tpl.push_str(&format!(
+            "    div \"{}\"\n",
+            normalize_crepus_text(&p.tool_name)
+        ));
+        tpl.push_str(&format!(
+            "    div \"{}\"\n",
+            normalize_crepus_text(&p.input_summary)
+        ));
+    }
+
+    if app.rename_visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Rename Session\"\n");
+        tpl.push_str(&format!(
+            "    div \"{}\"\n",
+            normalize_crepus_text(&app.rename_input)
+        ));
+    }
+
+    if app.login_popup.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Login\"\n");
+        if let Some(provider) = app.login_popup.provider.as_ref() {
+            tpl.push_str(&format!(
+                "    div \"provider: {}\"\n",
+                normalize_crepus_text(provider)
+            ));
+        }
+        if let Some(status) = app.login_popup.status.as_ref() {
+            tpl.push_str(&format!(
+                "    div \"status: {}\"\n",
+                normalize_crepus_text(status)
+            ));
+        }
+    }
+
+    if app.aside_popup.visible {
+        tpl.push_str("  div border-t border-zinc-800 p-1\n");
+        tpl.push_str("    div text-white font-bold \"Aside\"\n");
+        tpl.push_str(&format!(
+            "    div \"{}\"\n",
+            normalize_crepus_text(&app.aside_popup.question)
+        ));
+    }
+
     tpl
 }
 

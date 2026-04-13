@@ -17,6 +17,12 @@ impl DummyProvider {
     }
 }
 
+impl Default for DummyProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Provider for DummyProvider {
     fn name(&self) -> &str {
         "setup"

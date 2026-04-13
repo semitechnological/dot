@@ -71,5 +71,5 @@ unicode-width = "0.2.0"
 crepuscularity-tui = { path = "/tmp/crepus-tui-work/crates/crepuscularity-tui", optional = true }
 
 [features]
-default = []
+default = ["crepus-ui"]
 crepus-ui = ["dep:crepuscularity-tui"]

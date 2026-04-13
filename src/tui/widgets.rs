@@ -227,6 +227,12 @@ pub const COMMANDS: &[SlashCommand] = &[
         shortcut: "",
     },
     SlashCommand {
+        name: "quit",
+        aliases: &["q", "exit"],
+        description: "quit the app",
+        shortcut: "",
+    },
+    SlashCommand {
         name: "thinking",
         aliases: &["t", "think"],
         description: "set thinking level",

@@ -300,6 +300,7 @@ pub(super) fn execute_command(app: &mut App, cmd_name: &str) -> InputAction {
             app.help_popup.open();
             InputAction::None
         }
+        "quit" | "exit" => InputAction::Quit,
         "login" => InputAction::OpenLoginPopup,
         "aside" | "btw" => InputAction::None,
         other => {

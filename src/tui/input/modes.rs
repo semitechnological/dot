@@ -454,7 +454,16 @@ fn handle_send(app: &mut App) -> InputAction {
             let args = parts.next().unwrap_or_default().to_string();
             let builtin = matches!(
                 cmd.as_str(),
-                "model" | "agent" | "thinking" | "sessions" | "new" | "clear" | "help" | "export"
+                "model"
+                    | "agent"
+                    | "thinking"
+                    | "sessions"
+                    | "new"
+                    | "clear"
+                    | "help"
+                    | "quit"
+                    | "exit"
+                    | "export"
             );
             if matches!(cmd.as_str(), "aside" | "btw") {
                 if args.is_empty() {

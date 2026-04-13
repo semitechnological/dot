@@ -20,6 +20,57 @@ fn is_compact(w: u16) -> bool {
     w < 60
 }
 
+#[cfg(feature = "crepus-ui")]
+fn escape_crepus_text(raw: &str) -> String {
+    raw.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('{', "｛")
+        .replace('}', "｝")
+}
+
+#[cfg(feature = "crepus-ui")]
+fn build_crepus_messages_template(app: &App) -> String {
+    let mut tpl = String::from("div w-full h-full flex-col gap-1 p-1\n");
+
+    for msg in &app.messages {
+        let role = escape_crepus_text(&msg.role);
+        let mut content = msg.content.trim().to_string();
+        if content.is_empty() {
+            content = "(empty)".to_string();
+        }
+        let content = escape_crepus_text(&content);
+        tpl.push_str("  div border rounded p-1 flex-col\n");
+        tpl.push_str(&format!("    div text-gray-400 \"{}\"\n", role));
+        tpl.push_str(&format!("    div \"{}\"\n", content));
+    }
+
+    if app.is_streaming && !app.current_response.trim().is_empty() {
+        let content = escape_crepus_text(app.current_response.trim());
+        tpl.push_str("  div border rounded p-1 flex-col\n");
+        tpl.push_str("    div text-cyan-400 \"assistant (streaming)\"\n");
+        tpl.push_str(&format!("    div \"{}\"\n", content));
+    }
+
+    tpl
+}
+
+#[cfg(feature = "crepus-ui")]
+fn draw_messages_crepus(frame: &mut Frame, app: &mut App, area: Rect) -> bool {
+    if !app.use_crepus_ui {
+        return false;
+    }
+
+    let template = build_crepus_messages_template(app);
+    let paragraph = Paragraph::new(template).style(Style::default().fg(app.theme.fg));
+    frame.render_widget(paragraph, area);
+    true
+}
+
+#[cfg(not(feature = "crepus-ui"))]
+fn draw_messages_crepus(_frame: &mut Frame, _app: &mut App, _area: Rect) -> bool {
+    false
+}
+
 pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.welcome_screen.visible || app.login_popup.from_welcome && app.login_popup.visible {
         frame.render_widget(ratatui::widgets::Clear, frame.area());
@@ -212,6 +263,11 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let area = msg_area;
+
+    if draw_messages_crepus(frame, app, area) {
+        app.layout.messages = area;
+        return;
+    }
 
     let [content_area, scrollbar_area] = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)

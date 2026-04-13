@@ -409,6 +409,8 @@ pub struct App {
     pub cached_model_groups: Option<Vec<(String, Vec<String>)>>,
     pub model_fetch_rx: Option<ModelFetchReceiver>,
 
+    pub use_crepus_ui: bool,
+
     pub cursor_shape: CursorShape,
     pub cursor_blink: bool,
     pub cursor_shape_normal: Option<CursorShape>,
@@ -506,6 +508,9 @@ impl App {
             input_at_top: false,
             cached_model_groups: None,
             model_fetch_rx: None,
+            use_crepus_ui: std::env::var("DOT_UI_BACKEND")
+                .map(|v| v.eq_ignore_ascii_case("crepus"))
+                .unwrap_or(false),
             cursor_shape,
             cursor_blink,
             cursor_shape_normal,

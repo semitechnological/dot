@@ -61,8 +61,13 @@ fn draw_messages_crepus(frame: &mut Frame, app: &mut App, area: Rect) -> bool {
     }
 
     let template = build_crepus_messages_template(app);
-    let paragraph = Paragraph::new(template).style(Style::default().fg(app.theme.fg));
-    frame.render_widget(paragraph, area);
+    let ctx = crepuscularity_tui::TemplateContext::new();
+    if let Err(err) = crepuscularity_tui::render_template(&template, &ctx, frame, area) {
+        app.status_message = Some(crate::tui::app::StatusMessage::error(format!(
+            "crepus-ui render error: {err}"
+        )));
+        return false;
+    }
     true
 }
 

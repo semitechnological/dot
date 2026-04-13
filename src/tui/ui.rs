@@ -21,48 +21,73 @@ fn is_compact(w: u16) -> bool {
 }
 
 #[cfg(feature = "crepus-ui")]
-fn escape_crepus_text(raw: &str) -> String {
-    raw.replace('\\', "\\\\")
+fn normalize_crepus_text(raw: &str) -> String {
+    raw.replace(['\n', '\r'], " ")
+        .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('{', "｛")
         .replace('}', "｝")
 }
 
 #[cfg(feature = "crepus-ui")]
-fn build_crepus_messages_template(app: &App) -> String {
-    let mut tpl = String::from("div w-full h-full flex-col gap-1 p-1\n");
+fn build_crepus_shell_template(app: &App) -> String {
+    let title = normalize_crepus_text(
+        app.conversation_title
+            .as_deref()
+            .unwrap_or("new conversation"),
+    );
+    let model = normalize_crepus_text(&display_model(&app.model_name));
+    let status = normalize_crepus_text(
+        app.status_message
+            .as_ref()
+            .map(|s| s.text.as_str())
+            .unwrap_or(""),
+    );
+    let input = normalize_crepus_text(&app.input);
 
+    let mut tpl = String::from("div w-full h-full bg-zinc-950 text-zinc-100 flex flex-col\n");
+    tpl.push_str("  div h-1 border-b border-zinc-800 flex-row items-center px-1\n");
+    tpl.push_str(&format!("    div text-white font-bold \"{}\"\n", title));
+    tpl.push_str("    div flex-1\n");
+    tpl.push_str(&format!("    div text-zinc-400 \"{}\"\n", model));
+
+    tpl.push_str("  div flex-1 flex-col gap-1 p-1\n");
     for msg in &app.messages {
-        let role = escape_crepus_text(&msg.role);
+        let role = normalize_crepus_text(&msg.role);
         let mut content = msg.content.trim().to_string();
         if content.is_empty() {
             content = "(empty)".to_string();
         }
-        let content = escape_crepus_text(&content);
-        tpl.push_str("  div border rounded p-1 flex-col\n");
-        tpl.push_str(&format!("    div text-gray-400 \"{}\"\n", role));
-        tpl.push_str(&format!("    div \"{}\"\n", content));
+        let content = normalize_crepus_text(&content);
+        tpl.push_str("    div border rounded p-1 flex-col\n");
+        tpl.push_str(&format!("      div text-gray-400 \"{}\"\n", role));
+        tpl.push_str(&format!("      div \"{}\"\n", content));
     }
-
     if app.is_streaming && !app.current_response.trim().is_empty() {
-        let content = escape_crepus_text(app.current_response.trim());
-        tpl.push_str("  div border rounded p-1 flex-col\n");
-        tpl.push_str("    div text-cyan-400 \"assistant (streaming)\"\n");
-        tpl.push_str(&format!("    div \"{}\"\n", content));
+        let content = normalize_crepus_text(app.current_response.trim());
+        tpl.push_str("    div border rounded p-1 flex-col\n");
+        tpl.push_str("      div text-cyan-400 \"assistant (streaming)\"\n");
+        tpl.push_str(&format!("      div \"{}\"\n", content));
     }
 
+    tpl.push_str("  div border-t border-zinc-800 p-1\n");
+    tpl.push_str("    div text-zinc-400 text-xs \"Input\"\n");
+    tpl.push_str(&format!("    div rounded border border-zinc-700 p-1 \"{}\"\n", input));
+
+    tpl.push_str("  div border-t border-zinc-800 px-1 py-0 text-zinc-500\n");
+    tpl.push_str(&format!("    div \"{}\"\n", status));
     tpl
 }
 
 #[cfg(feature = "crepus-ui")]
-fn draw_messages_crepus(frame: &mut Frame, app: &mut App, area: Rect) -> bool {
+fn draw_shell_crepus(frame: &mut Frame, app: &mut App) -> bool {
     if !app.use_crepus_ui {
         return false;
     }
 
-    let template = build_crepus_messages_template(app);
+    let template = build_crepus_shell_template(app);
     let ctx = crepuscularity_tui::TemplateContext::new();
-    if let Err(err) = crepuscularity_tui::render_template(&template, &ctx, frame, area) {
+    if let Err(err) = crepuscularity_tui::render_template(&template, &ctx, frame, frame.area()) {
         app.status_message = Some(crate::tui::app::StatusMessage::error(format!(
             "crepus-ui render error: {err}"
         )));
@@ -72,7 +97,7 @@ fn draw_messages_crepus(frame: &mut Frame, app: &mut App, area: Rect) -> bool {
 }
 
 #[cfg(not(feature = "crepus-ui"))]
-fn draw_messages_crepus(_frame: &mut Frame, _app: &mut App, _area: Rect) -> bool {
+fn draw_shell_crepus(_frame: &mut Frame, _app: &mut App) -> bool {
     false
 }
 
@@ -111,13 +136,15 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     };
     app.layout.status = chunks[5];
 
-    draw_status_header(frame, app, chunks[0]);
-    draw_messages(frame, app, chunks[1]);
-    draw_input_separator(frame, app, chunks[2]);
-    draw_input(frame, app, chunks[3]);
-    render_input_selection(frame, app, chunks[3]);
-    draw_input_separator(frame, app, chunks[4]);
-    draw_token_bar(frame, app, chunks[5]);
+    if !draw_shell_crepus(frame, app) {
+        draw_status_header(frame, app, chunks[0]);
+        draw_messages(frame, app, chunks[1]);
+        draw_input_separator(frame, app, chunks[2]);
+        draw_input(frame, app, chunks[3]);
+        render_input_selection(frame, app, chunks[3]);
+        draw_input_separator(frame, app, chunks[4]);
+        draw_token_bar(frame, app, chunks[5]);
+    }
 
     if app.model_selector.visible {
         ui_popups::draw_model_selector(frame, app);
@@ -268,11 +295,6 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let area = msg_area;
-
-    if draw_messages_crepus(frame, app, area) {
-        app.layout.messages = area;
-        return;
-    }
 
     let [content_area, scrollbar_area] = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)

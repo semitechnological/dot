@@ -302,6 +302,38 @@ pub(super) fn execute_command(app: &mut App, cmd_name: &str) -> InputAction {
         }
         "quit" | "exit" => InputAction::Quit,
         "login" => InputAction::OpenLoginPopup,
+        "subagent" => {
+            app.status_message = Some(crate::tui::app::StatusMessage::info(
+                "usage: /subagent <task>",
+            ));
+            InputAction::None
+        }
+        "plan" => {
+            let open = app.todos.len();
+            app.status_message = Some(crate::tui::app::StatusMessage::info(format!(
+                "{} plan item{} visible",
+                open,
+                if open == 1 { "" } else { "s" }
+            )));
+            InputAction::None
+        }
+        "timeline" => {
+            let tools = app.current_tool_calls.len()
+                + usize::from(app.pending_tool_name.as_ref().is_some());
+            app.status_message = Some(crate::tui::app::StatusMessage::info(format!(
+                "{} tool event{} in current turn",
+                tools,
+                if tools == 1 { "" } else { "s" }
+            )));
+            InputAction::None
+        }
+        "workspace" => {
+            let cwd = std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| ".".to_string());
+            app.status_message = Some(crate::tui::app::StatusMessage::info(cwd));
+            InputAction::None
+        }
         "aside" | "btw" => InputAction::None,
         other => {
             if app.custom_command_names.contains(&other.to_string()) {

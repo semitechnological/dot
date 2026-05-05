@@ -245,6 +245,30 @@ pub const COMMANDS: &[SlashCommand] = &[
         shortcut: "",
     },
     SlashCommand {
+        name: "subagent",
+        aliases: &["bg", "spawn"],
+        description: "spawn a background subagent",
+        shortcut: "",
+    },
+    SlashCommand {
+        name: "plan",
+        aliases: &["todos"],
+        description: "show current plan",
+        shortcut: "",
+    },
+    SlashCommand {
+        name: "timeline",
+        aliases: &["tools"],
+        description: "show recent tool activity",
+        shortcut: "",
+    },
+    SlashCommand {
+        name: "workspace",
+        aliases: &["cwd", "pwd"],
+        description: "show workspace",
+        shortcut: "",
+    },
+    SlashCommand {
         name: "new",
         aliases: &["n"],
         description: "start new conversation",

@@ -82,6 +82,9 @@ pub enum InputAction {
     AskAside {
         question: String,
     },
+    SpawnSubagent {
+        task: String,
+    },
 }
 
 enum PasteItem {

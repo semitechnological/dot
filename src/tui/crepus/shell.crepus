@@ -1,0 +1,70 @@
+div w-full h-full text-[#cdd6f4] flex-col
+  div h-[2] border-b border-[#343648] flex-row pl-1
+    div flex-1 text-[#89b4fa] font-bold
+      "{title}"
+    div w-[{model_width}] text-[#585b70]
+      "{model}"
+
+  div flex-1 flex-col pl-1
+    if {has_todos}
+      div h-[{todos_height}] border-b border-[#343648] flex-col
+        div h-[1] text-[#89b4fa] font-bold
+          "plan"
+        for todo in {todos}
+          if {done}
+            div h-[1] text-[#585b70]
+              "✓ {text}"
+          else if {active}
+            div h-[1] text-[#f9e2af] font-bold
+              "› {text}"
+          else
+            div h-[1] text-[#cdd6f4]
+              "· {text}"
+
+    if {has_subagents}
+      div h-[{subagents_height}] border-b border-[#343648] flex-col
+        div h-[1] text-[#89b4fa] font-bold
+          "subagents"
+        for subagent in {subagents}
+          if {done}
+            div h-[1] text-[#a6e3a1]
+              "✓ {description}"
+          else
+            div h-[1] text-[#89b4fa]
+              "● {description} {detail}"
+
+    for message in {messages}
+      if {user}
+        div h-[{height}] border border-[#45475a] rounded pl-1 bg-[#09090b] text-[#cdd6f4] flex-col
+          div h-[1] text-[#585b70]
+            "{role}"
+          for line in {lines}
+            div h-[1] text-[#cdd6f4]
+              "{line}"
+      else
+        div h-[{height}] border-b border-[#343648] text-[#cdd6f4] flex-col
+          div h-[1] text-[#585b70]
+            "{role}"
+          for line in {lines}
+            div h-[1] text-[#cdd6f4]
+              "{line}"
+
+    if {streaming}
+      div h-[4] border border-[#89b4fa] rounded pl-1 flex-col
+        div h-[1] text-[#89dceb]
+          "assistant streaming"
+        div h-[1] text-[#cdd6f4]
+          "{streaming_text}"
+
+  div h-[2] border-t border-[#343648] flex-row pl-1
+    div w-[2] text-[#89b4fa] font-bold
+      "› "
+    div flex-1 text-[#cdd6f4]
+      "{input}"
+
+  div h-[2] border-t border-[#343648] flex-row pl-1 text-[#585b70]
+    div text-[#585b70]
+      "{tokens}"
+    div flex-1
+    div w-[{status_width}] text-[#585b70]
+      "{status}"

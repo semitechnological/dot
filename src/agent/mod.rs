@@ -170,6 +170,10 @@ impl Agent {
     pub fn background_tx(&self) -> Option<UnboundedSender<AgentEvent>> {
         self.background_tx.clone()
     }
+
+    pub fn spawn_user_subagent(&mut self, task: &str) -> Result<String> {
+        self.spawn_background_subagent("user requested subagent", task, None)
+    }
     fn event_context(&self, event: &Event) -> EventContext {
         EventContext {
             event: event.as_str().to_string(),

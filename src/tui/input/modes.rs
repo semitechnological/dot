@@ -450,7 +450,7 @@ fn handle_send(app: &mut App) -> InputAction {
     if let Some(msg) = app.take_input() {
         if let Some(rest) = msg.strip_prefix('/') {
             let mut parts = rest.splitn(2, char::is_whitespace);
-            let cmd = parts.next().unwrap_or_default().to_string();
+            let cmd = canonical_command(parts.next().unwrap_or_default());
             let args = parts.next().unwrap_or_default().to_string();
             let builtin = matches!(
                 cmd.as_str(),
@@ -458,6 +458,10 @@ fn handle_send(app: &mut App) -> InputAction {
                     | "agent"
                     | "thinking"
                     | "sessions"
+                    | "subagent"
+                    | "plan"
+                    | "timeline"
+                    | "workspace"
                     | "new"
                     | "clear"
                     | "help"
@@ -470,6 +474,12 @@ fn handle_send(app: &mut App) -> InputAction {
                     return InputAction::None;
                 }
                 return InputAction::AskAside { question: args };
+            }
+            if cmd == "subagent" {
+                if args.is_empty() {
+                    return InputAction::None;
+                }
+                return InputAction::SpawnSubagent { task: args };
             }
             if cmd == "rename" {
                 return if args.is_empty() {
@@ -492,6 +502,14 @@ fn handle_send(app: &mut App) -> InputAction {
     } else {
         InputAction::None
     }
+}
+
+fn canonical_command(name: &str) -> String {
+    crate::tui::widgets::COMMANDS
+        .iter()
+        .find(|cmd| cmd.name == name || cmd.aliases.contains(&name))
+        .map(|cmd| cmd.name.to_string())
+        .unwrap_or_else(|| name.to_string())
 }
 
 fn handle_char_input(app: &mut App, c: char) -> InputAction {

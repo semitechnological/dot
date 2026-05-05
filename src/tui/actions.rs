@@ -345,6 +345,7 @@ pub async fn dispatch_acp_action(
         | InputAction::LoginSubmitApiKey { .. }
         | InputAction::LoginOAuth { .. }
         | InputAction::AskAside { .. }
+        | InputAction::SpawnSubagent { .. }
         | InputAction::None => {
             app.status_message = Some(app::StatusMessage::info("not available in ACP mode"));
         }
@@ -1149,6 +1150,21 @@ pub async fn dispatch_action(
                 });
             } else {
                 app.status_message = Some(app::StatusMessage::error("aside not available"));
+            }
+        }
+        InputAction::SpawnSubagent { task } => {
+            let mut agent_lock = agent.lock().await;
+            match agent_lock.spawn_user_subagent(&task) {
+                Ok(id) => {
+                    app.status_message = Some(app::StatusMessage::success(format!(
+                        "subagent spawned: {id}"
+                    )));
+                }
+                Err(e) => {
+                    app.status_message = Some(app::StatusMessage::error(format!(
+                        "failed to spawn subagent: {e}"
+                    )));
+                }
             }
         }
         InputAction::AnswerPermission(_) | InputAction::None => {}

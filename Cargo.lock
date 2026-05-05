@@ -416,6 +416,8 @@ dependencies = [
 [[package]]
 name = "crepuscularity-core"
 version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "beaa63f239e9b5d73dba90bbc00aa163b023bf40e8873fafa3eec3e2ddeb864b"
 dependencies = [
  "sha2 0.11.0",
  "toml 1.1.2+spec-1.1.0",
@@ -425,6 +427,8 @@ dependencies = [
 [[package]]
 name = "crepuscularity-tui"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c8ea22646c2bb79afec4da805bdc07bd129e6d6528debac3990942303986261"
 dependencies = [
  "crepuscularity-core",
  "ratatui",

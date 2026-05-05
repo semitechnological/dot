@@ -16,11 +16,12 @@ use crate::tui::theme::Theme;
 use crate::tui::ui_popups;
 use crate::tui::ui_tools;
 
+const SHELL_TEMPLATE: &str = include_str!("crepus/shell.crepus");
+
 fn is_compact(w: u16) -> bool {
     w < 60
 }
 
-#[cfg(feature = "crepus-ui")]
 fn normalize_crepus_text(raw: &str) -> String {
     raw.replace(['\n', '\r'], " ")
         .replace('\\', "\\\\")
@@ -29,9 +30,13 @@ fn normalize_crepus_text(raw: &str) -> String {
         .replace('}', "｝")
 }
 
-#[cfg(feature = "crepus-ui")]
-#[allow(dead_code)]
-fn build_crepus_shell_template(app: &App) -> String {
+fn line_ctx(text: impl Into<String>) -> crepuscularity_tui::TemplateContext {
+    let mut ctx = crepuscularity_tui::TemplateContext::new();
+    ctx.set("value", normalize_crepus_text(&text.into()));
+    ctx
+}
+
+fn build_crepus_shell_context(app: &App, width: u16) -> crepuscularity_tui::TemplateContext {
     let title = normalize_crepus_text(
         app.conversation_title
             .as_deref()
@@ -46,323 +51,198 @@ fn build_crepus_shell_template(app: &App) -> String {
     );
     let input = normalize_crepus_text(&app.input);
 
-    let mut tpl = String::from("div w-full h-full bg-zinc-950 text-zinc-100 flex flex-col\n");
-    tpl.push_str("  div h-1 border-b border-zinc-800 flex-row items-center px-1\n");
-    tpl.push_str(&format!("    div text-white font-bold \"{}\"\n", title));
-    tpl.push_str("    div flex-1\n");
-    tpl.push_str(&format!("    div text-zinc-400 \"{}\"\n", model));
+    let model_width = model.chars().count().max(1);
+    let status_width = status
+        .chars()
+        .count()
+        .min(width.saturating_sub(4) as usize)
+        .max(1);
 
-    tpl.push_str("  div flex-1 flex-col gap-1 p-1\n");
-    for msg in &app.messages {
-        let role = normalize_crepus_text(&msg.role);
-        let mut content = msg.content.trim().to_string();
-        if content.is_empty() {
-            content = "(empty)".to_string();
-        }
-        let content = normalize_crepus_text(&content);
-        tpl.push_str("    div border rounded p-1 flex-col\n");
-        tpl.push_str(&format!("      div text-gray-400 \"{}\"\n", role));
-        tpl.push_str(&format!("      div \"{}\"\n", content));
-    }
-    if app.is_streaming && !app.current_response.trim().is_empty() {
-        let content = normalize_crepus_text(app.current_response.trim());
-        tpl.push_str("    div border rounded p-1 flex-col\n");
-        tpl.push_str("      div text-cyan-400 \"assistant (streaming)\"\n");
-        tpl.push_str(&format!("      div \"{}\"\n", content));
-    }
+    let visible = app.layout.messages.height.saturating_sub(1) as usize;
+    let start = app.messages.len().saturating_sub(visible.max(1) / 3);
+    let messages: Vec<crepuscularity_tui::TemplateContext> = app
+        .messages
+        .iter()
+        .skip(start)
+        .map(|msg| {
+            let mut ctx = crepuscularity_tui::TemplateContext::new();
+            ctx.set("role", normalize_crepus_text(&msg.role));
+            ctx.set("user", msg.role == "user");
+            let mut content = msg.content.trim().to_string();
+            if content.is_empty() {
+                content = "(empty)".to_string();
+            }
+            let lines: Vec<crepuscularity_tui::TemplateContext> =
+                content.lines().take(6).map(line_ctx).collect();
+            ctx.set(
+                "height",
+                (lines.len() + if msg.role == "user" { 4 } else { 3 }) as i64,
+            );
+            ctx.set("lines", crepuscularity_tui::TemplateValue::List(lines));
+            ctx
+        })
+        .collect();
 
-    tpl.push_str("  div border-t border-zinc-800 p-1\n");
-    tpl.push_str("    div text-zinc-400 text-xs \"Input\"\n");
-    tpl.push_str(&format!(
-        "    div rounded border border-zinc-700 p-1 \"{}\"\n",
-        input
-    ));
+    let todos: Vec<crepuscularity_tui::TemplateContext> = app
+        .todos
+        .iter()
+        .take(5)
+        .map(|todo| {
+            let mut ctx = crepuscularity_tui::TemplateContext::new();
+            ctx.set("text", normalize_crepus_text(&todo.content));
+            ctx.set("active", todo.status == TodoStatus::InProgress);
+            ctx.set("done", todo.status == TodoStatus::Completed);
+            ctx
+        })
+        .collect();
+    let subagents: Vec<crepuscularity_tui::TemplateContext> = app
+        .background_subagents
+        .iter()
+        .take(4)
+        .map(|subagent| {
+            let mut ctx = crepuscularity_tui::TemplateContext::new();
+            ctx.set("description", normalize_crepus_text(&subagent.description));
+            ctx.set("done", subagent.done);
+            ctx.set(
+                "detail",
+                normalize_crepus_text(
+                    subagent
+                        .current_tool
+                        .as_deref()
+                        .or(subagent.current_tool_detail.as_deref())
+                        .unwrap_or(""),
+                ),
+            );
+            ctx
+        })
+        .collect();
 
-    tpl.push_str("  div border-t border-zinc-800 px-1 py-0 text-zinc-500\n");
-    tpl.push_str(&format!("    div \"{}\"\n", status));
-
-    if app.welcome_screen.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Welcome\"\n");
-        for (idx, (label, desc)) in crate::tui::widgets::WelcomeScreen::choices()
-            .iter()
-            .enumerate()
-        {
-            let prefix = if idx == app.welcome_screen.selected {
-                ">"
-            } else {
-                " "
-            };
-            tpl.push_str(&format!(
-                "    div \"{} {} - {}\"\n",
-                prefix,
-                normalize_crepus_text(label),
-                normalize_crepus_text(desc)
-            ));
-        }
-    }
-
-    if app.model_selector.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Models\"\n");
-        tpl.push_str(&format!(
-            "    div \"query: {}\"\n",
-            normalize_crepus_text(&app.model_selector.query)
-        ));
-        for idx in app.model_selector.filtered.iter().take(10) {
-            let entry = &app.model_selector.entries[*idx];
-            let selected = app
-                .model_selector
-                .filtered
-                .get(app.model_selector.selected)
-                .copied()
-                == Some(*idx);
-            let prefix = if selected { ">" } else { " " };
-            tpl.push_str(&format!(
-                "    div \"{} {} / {}\"\n",
-                prefix,
-                normalize_crepus_text(&entry.provider),
-                normalize_crepus_text(&entry.model)
-            ));
-        }
-    }
-
-    if app.agent_selector.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Agents\"\n");
-        for (idx, entry) in app.agent_selector.entries.iter().enumerate().take(10) {
-            let prefix = if idx == app.agent_selector.selected {
-                ">"
-            } else {
-                " "
-            };
-            tpl.push_str(&format!(
-                "    div \"{} {} - {}\"\n",
-                prefix,
-                normalize_crepus_text(&entry.name),
-                normalize_crepus_text(&entry.description)
-            ));
-        }
-    }
-
-    if app.thinking_selector.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Thinking\"\n");
-        for (idx, level) in crate::tui::widgets::ThinkingLevel::all().iter().enumerate() {
-            let prefix = if idx == app.thinking_selector.selected {
-                ">"
-            } else {
-                " "
-            };
-            tpl.push_str(&format!(
-                "    div \"{} {} - {}\"\n",
-                prefix,
-                level.label(),
-                normalize_crepus_text(level.description())
-            ));
-        }
-    }
-
-    if app.session_selector.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Sessions\"\n");
-        tpl.push_str(&format!(
-            "    div \"query: {}\"\n",
-            normalize_crepus_text(&app.session_selector.query)
-        ));
-        for idx in app.session_selector.filtered.iter().take(10) {
-            let entry = &app.session_selector.entries[*idx];
-            let selected = app
-                .session_selector
-                .filtered
-                .get(app.session_selector.selected)
-                .copied()
-                == Some(*idx);
-            let prefix = if selected { ">" } else { " " };
-            tpl.push_str(&format!(
-                "    div \"{} {} - {}\"\n",
-                prefix,
-                normalize_crepus_text(&entry.title),
-                normalize_crepus_text(&entry.subtitle)
-            ));
-        }
-    }
-
-    if app.command_palette.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Commands\"\n");
-        tpl.push_str(&format!(
-            "    div \"/{}\"\n",
-            normalize_crepus_text(app.input.trim_start_matches('/'))
-        ));
-        for &idx in app.command_palette.filtered.iter().take(10) {
-            let entry = &app.command_palette.entries[idx];
-            let prefix = if app
-                .command_palette
-                .filtered
-                .get(app.command_palette.selected)
-                .copied()
-                == Some(idx)
-            {
-                ">"
-            } else {
-                " "
-            };
-            tpl.push_str(&format!(
-                "    div \"{} /{} - {}\"\n",
-                prefix,
-                normalize_crepus_text(&entry.name),
-                normalize_crepus_text(&entry.description)
-            ));
-        }
-    }
-
-    if app.file_picker.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Files\"\n");
-        tpl.push_str(&format!(
-            "    div \"query: {}\"\n",
-            normalize_crepus_text(&app.file_picker.query)
-        ));
-        for idx in app.file_picker.filtered.iter().take(10) {
-            let entry = &app.file_picker.entries[*idx];
-            let prefix = if app
-                .file_picker
-                .filtered
-                .get(app.file_picker.selected)
-                .copied()
-                == Some(*idx)
-            {
-                ">"
-            } else {
-                " "
-            };
-            tpl.push_str(&format!(
-                "    div \"{} {}\"\n",
-                prefix,
-                normalize_crepus_text(&entry.path)
-            ));
-        }
-    }
-
-    if app.help_popup.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Help\"\n");
-        tpl.push_str("    div \"q quit /help open help /quit exits\"\n");
-    }
-
-    if app.context_menu.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Message Menu\"\n");
-        for (idx, label) in crate::tui::widgets::MessageContextMenu::labels()
-            .iter()
-            .enumerate()
-        {
-            let prefix = if idx == app.context_menu.selected {
-                ">"
-            } else {
-                " "
-            };
-            tpl.push_str(&format!(
-                "    div \"{} {}\"\n",
-                prefix,
-                normalize_crepus_text(label)
-            ));
-        }
-    }
-
-    if let Some(q) = app.pending_question.as_ref() {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Question\"\n");
-        tpl.push_str(&format!(
-            "    div \"{}\"\n",
-            normalize_crepus_text(&q.question)
-        ));
-    }
-
-    if let Some(p) = app.pending_permission.as_ref() {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Permission\"\n");
-        tpl.push_str(&format!(
-            "    div \"{}\"\n",
-            normalize_crepus_text(&p.tool_name)
-        ));
-        tpl.push_str(&format!(
-            "    div \"{}\"\n",
-            normalize_crepus_text(&p.input_summary)
-        ));
-    }
-
-    if app.rename_visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Rename Session\"\n");
-        tpl.push_str(&format!(
-            "    div \"{}\"\n",
-            normalize_crepus_text(&app.rename_input)
-        ));
-    }
-
-    if app.login_popup.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Login\"\n");
-        if let Some(provider) = app.login_popup.provider.as_ref() {
-            tpl.push_str(&format!(
-                "    div \"provider: {}\"\n",
-                normalize_crepus_text(provider)
-            ));
-        }
-        if let Some(status) = app.login_popup.status.as_ref() {
-            tpl.push_str(&format!(
-                "    div \"status: {}\"\n",
-                normalize_crepus_text(status)
-            ));
-        }
-    }
-
-    if app.aside_popup.visible {
-        tpl.push_str("  div border-t border-zinc-800 p-1\n");
-        tpl.push_str("    div text-white font-bold \"Aside\"\n");
-        tpl.push_str(&format!(
-            "    div \"{}\"\n",
-            normalize_crepus_text(&app.aside_popup.question)
-        ));
-    }
-
-    tpl
+    let mut ctx = crepuscularity_tui::TemplateContext::new();
+    ctx.set("title", title);
+    ctx.set("model", model);
+    ctx.set("model_width", model_width as i64);
+    ctx.set("status", status);
+    ctx.set("status_width", status_width as i64);
+    ctx.set("input", input);
+    ctx.set(
+        "tokens",
+        format!(
+            "{}in · {}out",
+            format_tokens(app.usage.input_tokens),
+            format_tokens(app.usage.output_tokens)
+        ),
+    );
+    ctx.set(
+        "messages",
+        crepuscularity_tui::TemplateValue::List(messages),
+    );
+    ctx.set(
+        "todos",
+        crepuscularity_tui::TemplateValue::List(todos.clone()),
+    );
+    ctx.set("has_todos", !todos.is_empty());
+    ctx.set("todos_height", (todos.len() + 2).min(7) as i64);
+    ctx.set(
+        "subagents",
+        crepuscularity_tui::TemplateValue::List(subagents.clone()),
+    );
+    ctx.set("has_subagents", !subagents.is_empty());
+    ctx.set("subagents_height", (subagents.len() + 2).min(6) as i64);
+    ctx.set(
+        "streaming",
+        app.is_streaming && !app.current_response.trim().is_empty(),
+    );
+    ctx.set(
+        "streaming_text",
+        normalize_crepus_text(app.current_response.trim()),
+    );
+    ctx
 }
 
-#[cfg(feature = "crepus-ui")]
-#[allow(dead_code)]
-fn draw_shell_crepus(frame: &mut Frame, app: &mut App) -> bool {
-    if !app.use_crepus_ui {
-        return false;
-    }
-
-    let template = build_crepus_shell_template(app);
-    let ctx = crepuscularity_tui::TemplateContext::new();
-    if let Err(err) = crepuscularity_tui::render_template(&template, &ctx, frame, frame.area()) {
+fn draw_shell_crepus(frame: &mut Frame, app: &mut App) {
+    let ctx = build_crepus_shell_context(app, frame.area().width);
+    if let Err(err) = crepuscularity_tui::render_template(SHELL_TEMPLATE, &ctx, frame, frame.area())
+    {
         app.status_message = Some(crate::tui::app::StatusMessage::error(format!(
             "crepus-ui render error: {err}"
         )));
-        return false;
     }
-    true
+    let display = app.display_input();
+    let dcursor = app.display_cursor_pos();
+    let (cx, cy) = cursor_position(&display, dcursor, app.layout.input);
+    if cy < frame.area().y + frame.area().height {
+        frame.set_cursor_position((cx, cy));
+    }
 }
-
-#[cfg(not(feature = "crepus-ui"))]
-fn draw_shell_crepus(_frame: &mut Frame, _app: &mut App) -> bool {
-    false
-}
-
-#[cfg(feature = "crepus-ui")]
-fn draw_overlay_crepus(frame: &mut Frame, app: &mut App) {
-    let _ = (frame, app);
-}
-
-#[cfg(not(feature = "crepus-ui"))]
-fn draw_overlay_crepus(_frame: &mut Frame, _app: &mut App) {}
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    setup_layout(frame, app);
+    draw_shell_crepus(frame, app);
+    draw_crepus_overlays(frame, app);
+}
+
+fn draw_crepus_overlays(frame: &mut Frame, app: &mut App) {
+    if app.welcome_screen.visible {
+        ui_popups::draw_welcome_screen(frame, app);
+    }
+
+    if app.model_selector.visible {
+        ui_popups::draw_model_selector(frame, app);
+    }
+
+    if app.agent_selector.visible {
+        ui_popups::draw_agent_selector(frame, app);
+    }
+
+    if app.thinking_selector.visible {
+        ui_popups::draw_thinking_selector(frame, app);
+    }
+
+    if app.command_palette.visible {
+        ui_popups::draw_command_palette(frame, app, app.layout.input);
+    }
+
+    if app.file_picker.visible {
+        ui_popups::draw_file_picker(frame, app, app.layout.input);
+    }
+
+    if app.session_selector.visible {
+        ui_popups::draw_session_selector(frame, app);
+    }
+
+    if app.help_popup.visible {
+        ui_popups::draw_help_popup(frame, app);
+    }
+
+    if app.context_menu.visible {
+        ui_popups::draw_context_menu(frame, app);
+    }
+
+    if app.pending_question.is_some() {
+        ui_popups::draw_question_popup(frame, app);
+    }
+
+    if app.pending_permission.is_some() {
+        ui_popups::draw_permission_popup(frame, app);
+    }
+
+    if app.rename_visible {
+        ui_popups::draw_rename_popup(frame, app);
+    }
+
+    if app.login_popup.visible {
+        ui_popups::draw_login_popup(frame, app);
+    }
+
+    if app.aside_popup.visible {
+        ui_popups::draw_aside_popup(frame, app);
+    }
+}
+
+#[allow(dead_code)]
+fn draw_ratatui(frame: &mut Frame, app: &mut App) {
+    let chunks = setup_layout(frame, app);
+
     if app.welcome_screen.visible || app.login_popup.from_welcome && app.login_popup.visible {
         frame.render_widget(ratatui::widgets::Clear, frame.area());
         if app.welcome_screen.visible {
@@ -373,29 +253,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
         return;
     }
-
-    let input_height = app.input_height(frame.area().width);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-            Constraint::Length(input_height),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .split(frame.area());
-
-    app.layout.header = chunks[0];
-    app.layout.messages = chunks[1];
-    app.layout.input = Rect {
-        x: chunks[2].x,
-        y: chunks[2].y,
-        width: chunks[2].width,
-        height: chunks[2].height + chunks[3].height + chunks[4].height,
-    };
-    app.layout.status = chunks[5];
 
     draw_status_header(frame, app, chunks[0]);
     draw_messages(frame, app, chunks[1]);
@@ -456,8 +313,31 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.aside_popup.visible {
         ui_popups::draw_aside_popup(frame, app);
     }
+}
 
-    draw_overlay_crepus(frame, app);
+fn setup_layout(frame: &Frame, app: &mut App) -> [Rect; 6] {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(1),
+            Constraint::Length(0),
+            Constraint::Length(2),
+            Constraint::Length(0),
+            Constraint::Length(2),
+        ])
+        .areas(frame.area());
+
+    app.layout.header = chunks[0];
+    app.layout.messages = chunks[1];
+    app.layout.input = Rect {
+        x: chunks[3].x.saturating_add(1),
+        y: chunks[3].y.saturating_add(1),
+        width: chunks[3].width.saturating_sub(1),
+        height: 1,
+    };
+    app.layout.status = chunks[5];
+    chunks
 }
 
 fn draw_status_header(frame: &mut Frame, app: &App, area: Rect) {
@@ -504,7 +384,7 @@ fn draw_status_header(frame: &mut Frame, app: &App, area: Rect) {
     let gap = (area.width as usize).saturating_sub(left_width + right_width);
 
     let spans = vec![
-        Span::styled(left_text, app.theme.dim),
+        Span::styled(left_text, app.theme.heading),
         Span::raw(" ".repeat(gap)),
         Span::styled(right_text, app.theme.dim),
     ];
@@ -2008,5 +1888,192 @@ fn render_selection_highlight(frame: &mut Frame, app: &App, area: Rect) {
                 cell.set_style(current.add_modifier(Modifier::REVERSED));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    use super::*;
+
+    fn rows(terminal: &Terminal<TestBackend>) -> Vec<String> {
+        let buf = terminal.backend().buffer();
+        (0..buf.area.height)
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| {
+                        buf.cell((x, y))
+                            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+                            .unwrap_or(' ')
+                    })
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    fn row(terminal: &Terminal<TestBackend>, y: u16) -> String {
+        rows(terminal).get(y as usize).cloned().unwrap_or_default()
+    }
+
+    fn app() -> App {
+        App::new(
+            "gpt-4o".to_string(),
+            "openai".to_string(),
+            "dot".to_string(),
+            "dark",
+            true,
+            crate::config::CursorShape::Block,
+            true,
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn crepus_shell_renders_core_regions() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.conversation_title = Some("render smoke".to_string());
+        app.input = "hello crepus".to_string();
+        app.cursor_pos = app.input.len();
+        app.messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: "test prompt".to_string(),
+            tool_calls: Vec::new(),
+            thinking: None,
+            model: None,
+            segments: None,
+            chips: None,
+        });
+        app.messages.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: "test response".to_string(),
+            tool_calls: Vec::new(),
+            thinking: None,
+            model: Some("claude-sonnet-4-20250514".to_string()),
+            segments: None,
+            chips: None,
+        });
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        let screen = rows(&terminal).join("\n");
+        let header = row(&terminal, 0);
+        let input = row(&terminal, 21);
+        assert!(screen.contains("render smoke"));
+        assert!(screen.contains("test prompt"));
+        assert!(screen.contains("test response"));
+        let user_row = rows(&terminal)
+            .iter()
+            .position(|r| r.contains("test prompt"))
+            .unwrap();
+        let assistant_row = rows(&terminal)
+            .iter()
+            .position(|r| r.contains("test response"))
+            .unwrap();
+        assert!(
+            assistant_row.saturating_sub(user_row) < 8,
+            "messages should stack like chat, not fill the viewport\n{screen}"
+        );
+        assert!(screen.contains("hello crepus"));
+        assert!(header.ends_with("GPT 4o"), "header: {header:?}\n{screen}");
+        assert!(
+            input.contains("› hello crepus"),
+            "input: {input:?}\n{screen}"
+        );
+        assert_eq!(
+            terminal.backend().buffer().cell((0, 0)).map(|c| c.bg),
+            Some(Color::Reset)
+        );
+    }
+
+    #[test]
+    fn crepus_command_palette_anchors_above_input() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.input = "/he".to_string();
+        app.cursor_pos = app.input.len();
+        app.command_palette.open(&app.input);
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        let screen = rows(&terminal).join("\n");
+        let popup = app.layout.command_palette.unwrap();
+        assert!(screen.contains("commands"));
+        assert!(screen.contains("/ help"), "{screen}");
+        assert!(popup.y < app.layout.input.y);
+        assert!(popup.height > 1);
+    }
+
+    #[test]
+    fn crepus_modal_overlays_render_selected_actions() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.model_selector.open(
+            vec![("openai".to_string(), vec!["gpt-4o".to_string()])],
+            "openai",
+            "gpt-4o",
+        );
+        app.pending_permission = Some(crate::tui::app::PendingPermission {
+            tool_name: "shell".to_string(),
+            input_summary: "cargo test".to_string(),
+            selected: 0,
+            responder: None,
+        });
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        let screen = rows(&terminal).join("\n");
+        assert!(screen.contains("permission"));
+        assert!(screen.contains("Allow shell?"));
+        assert!(screen.contains("› Allow"));
+        assert!(app.layout.model_selector.is_some());
+        assert!(app.layout.permission_popup.is_some());
+    }
+
+    #[test]
+    fn crepus_shell_renders_plan_and_subagents() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = app();
+        app.todos = vec![
+            crate::agent::TodoItem {
+                content: "inspect templates".to_string(),
+                status: TodoStatus::Completed,
+            },
+            crate::agent::TodoItem {
+                content: "wire subagent command".to_string(),
+                status: TodoStatus::InProgress,
+            },
+        ];
+        app.background_subagents.push(BackgroundSubagentInfo {
+            id: "bg-1".to_string(),
+            description: "parallel polish".to_string(),
+            output: String::new(),
+            tools_completed: 1,
+            done: false,
+            started: std::time::Instant::now(),
+            finished_at: None,
+            current_tool: Some("rg".to_string()),
+            current_tool_detail: None,
+            tool_history: Vec::new(),
+            tokens: 0,
+            cost: 0.0,
+            text_lines: Vec::new(),
+        });
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        let screen = rows(&terminal).join("\n");
+        assert!(screen.contains("plan"));
+        assert!(screen.contains("✓ inspect templates"));
+        assert!(screen.contains("› wire subagent command"), "{screen}");
+        assert!(screen.contains("subagents"));
+        assert!(screen.contains("parallel polish"));
     }
 }

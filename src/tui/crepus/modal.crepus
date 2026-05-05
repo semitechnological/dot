@@ -1,0 +1,25 @@
+div w-full h-full flex-col border border-[#313244] bg-[#09090b] text-[#cdd6f4]
+  div h-[2] border-b border-[#343648] flex-row pl-1
+    div flex-1 text-[#89b4fa] font-bold
+      "{title}"
+  div flex-1 flex-col pl-1
+    for row in {rows}
+      if {selected}
+        div h-[1] text-[#89b4fa] font-bold
+          "› {text}"
+      else if {muted}
+        div h-[1] text-[#585b70]
+          "{text}"
+      else if {success}
+        div h-[1] text-[#a6e3a1]
+          "{text}"
+      else if {accent}
+        div h-[1] text-[#89b4fa] font-bold
+          "{text}"
+      else
+        div h-[1] text-[#cdd6f4]
+          "{text}"
+  if {has_footer}
+    div h-[2] border-t border-[#343648] pl-1
+      div text-[#585b70]
+        "{footer}"

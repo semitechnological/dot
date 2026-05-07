@@ -565,6 +565,7 @@ pub fn draw_welcome_screen(frame: &mut Frame, app: &mut App) {
     let area = centered_popup(frame.area(), 54, choices.len() * 2 + 7);
     app.layout.welcome_screen = Some(area);
     let mut lines = vec![
+        empty_line(),
         accent_line("dot"),
         muted_line("minimal ai agent"),
         empty_line(),

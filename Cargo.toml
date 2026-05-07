@@ -68,4 +68,7 @@ anyhow = "1"
 glob = "0.3"
 regex = "1"
 unicode-width = "0.2.0"
-crepuscularity-tui = "0.1.0"
+crepuscularity-tui = "0.3.0"
+
+[build-dependencies]
+crepuscularity-tui = "0.3.0"

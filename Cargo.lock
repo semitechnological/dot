@@ -415,9 +415,9 @@ dependencies = [
 
 [[package]]
 name = "crepuscularity-core"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "beaa63f239e9b5d73dba90bbc00aa163b023bf40e8873fafa3eec3e2ddeb864b"
+checksum = "0690f544b38f1061c880ee823f24383d7fcb3a4ce4b1fc824b5f1cf5901f0f7f"
 dependencies = [
  "sha2 0.11.0",
  "toml 1.1.2+spec-1.1.0",
@@ -426,12 +426,25 @@ dependencies = [
 
 [[package]]
 name = "crepuscularity-tui"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c8ea22646c2bb79afec4da805bdc07bd129e6d6528debac3990942303986261"
+checksum = "b935d350a19cf7cd13438eb952f4ce2eb7c302196ee06afc34dbf3417059823d"
 dependencies = [
  "crepuscularity-core",
+ "crepuscularity_macros",
  "ratatui",
+]
+
+[[package]]
+name = "crepuscularity_macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3ffc5eba94fffafea9d920dac487d20ad4486b72cf5fc29e46476e32435ef8b"
+dependencies = [
+ "crepuscularity-core",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -1,8 +1,6 @@
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::layout::Rect;
+use ratatui::widgets::Clear;
 
 use crate::tui::app::{App, StatusMessage};
 use crate::tui::widgets::{
@@ -94,22 +92,6 @@ fn render_crepus_rows(
     }
 }
 
-fn crepus_enabled() -> bool {
-    true
-}
-
-fn popup_block(title: &str, accent: Color, muted: Color) -> Block<'static> {
-    let line = Line::from(vec![
-        Span::styled("\u{2500} ", Style::default().fg(muted)),
-        Span::styled(title.to_owned(), Style::default().fg(accent)),
-        Span::raw(" "),
-    ]);
-    Block::default()
-        .title(line)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(muted))
-}
-
 fn centered_popup(area: Rect, content_width: usize, content_height: usize) -> Rect {
     let width = (content_width as u16).min(area.width.saturating_sub(4));
     let height = (content_height as u16).min(area.height.saturating_sub(2));
@@ -146,1305 +128,411 @@ fn scroll_start(selected: usize, visible: usize) -> usize {
 }
 
 pub fn draw_model_selector(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled() {
-        let area = popup_rect(frame.area());
-        app.layout.model_selector = Some(area);
-        let sel = &app.model_selector;
-        let visible = area.height.saturating_sub(4) as usize;
-        let start = scroll_start(sel.selected, visible);
-        let mut lines = vec![muted_line(if sel.query.is_empty() {
-            "type to filter...".to_string()
-        } else {
-            format!("filter: {}", sel.query)
-        })];
-        for (item, &idx) in sel
-            .filtered
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(visible.saturating_sub(1))
-        {
-            let entry = &app.model_selector.entries[idx];
-            let current =
-                entry.provider == sel.current_provider && entry.model == sel.current_model;
-            let favorite = sel.favorites.contains(&entry.model);
-            let marker = if favorite { "* " } else { "  " };
-            let text = format!(
-                "{}{} / {}{}",
-                marker,
-                entry.provider,
-                crate::tui::ui::display_model(&entry.model),
-                if current { " current" } else { "" }
-            );
-            if item == sel.selected {
-                lines.push(selected_line(text));
-            } else if current {
-                lines.push(success_line(text));
-            } else {
-                lines.push(plain_line(text));
-            }
-        }
-        if sel.filtered.is_empty() {
-            lines.push(muted_line("no matches"));
-        }
-        render_crepus_rows(
-            frame,
-            app,
-            area,
-            "model",
-            &lines,
-            Some("up/down select  enter confirm  s favorite  esc cancel"),
-        );
-        return;
-    }
-
+    let area = popup_rect(frame.area());
+    app.layout.model_selector = Some(area);
     let sel = &app.model_selector;
-    if sel.filtered.is_empty() && sel.query.is_empty() {
-        return;
-    }
-
-    let popup = popup_rect(frame.area());
-    app.layout.model_selector = Some(popup);
-
-    frame.render_widget(Clear, popup);
-
-    let block = popup_block("model", app.theme.accent, app.theme.muted_fg);
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-    let mut selected_line: usize = 0;
-    let mut last_provider: Option<&str> = None;
-
-    for (item_idx, &entry_idx) in sel.filtered.iter().enumerate() {
-        let entry = &sel.entries[entry_idx];
-
-        if last_provider != Some(&entry.provider) {
-            if last_provider.is_some() {
-                content_lines.push(Line::from(""));
-            }
-            content_lines.push(Line::from(Span::styled(
-                format!("  {}", entry.provider),
-                app.theme.dim,
-            )));
-            last_provider = Some(&entry.provider);
-        }
-
-        let _is_current =
-            entry.provider == sel.current_provider && entry.model == sel.current_model;
-        let is_sel = item_idx == sel.selected;
-
-        if is_sel {
-            selected_line = content_lines.len();
-        }
-
-        let prefix = if is_sel { "\u{203a} " } else { "  " };
-        let marker_style = if is_sel {
-            Style::default()
-        } else {
-            app.theme.dim
-        };
-
-        let name_style = if is_sel {
-            Style::default().add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-
-        let is_fav = sel.favorites.contains(&entry.model);
-        let star = if is_fav { "\u{2605} " } else { "  " };
-        let mut spans = vec![Span::styled(format!("  {}", prefix), marker_style)];
-        spans.push(Span::styled(star.to_string(), app.theme.dim));
-        spans.push(Span::styled(
+    let visible = area.height.saturating_sub(4) as usize;
+    let start = scroll_start(sel.selected, visible);
+    let mut lines = vec![muted_line(if sel.query.is_empty() {
+        "type to filter...".to_string()
+    } else {
+        format!("filter: {}", sel.query)
+    })];
+    for (item, &idx) in sel
+        .filtered
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(visible.saturating_sub(1))
+    {
+        let entry = &app.model_selector.entries[idx];
+        let current = entry.provider == sel.current_provider && entry.model == sel.current_model;
+        let favorite = sel.favorites.contains(&entry.model);
+        let marker = if favorite { "* " } else { "  " };
+        let text = format!(
+            "{}{} / {}{}",
+            marker,
+            entry.provider,
             crate::tui::ui::display_model(&entry.model),
-            name_style,
-        ));
-        content_lines.push(Line::from(spans));
+            if current { " current" } else { "" }
+        );
+        if item == sel.selected {
+            lines.push(selected_line(text));
+        } else if current {
+            lines.push(success_line(text));
+        } else {
+            lines.push(plain_line(text));
+        }
     }
-
     if sel.filtered.is_empty() {
-        content_lines.push(Line::from(Span::styled(" no matches", app.theme.dim)));
+        lines.push(muted_line("no matches"));
     }
-
-    let footer = "\u{2191}\u{2193} select  enter confirm  s/* favorite  esc cancel";
-
-    let items_visible = (inner.height as usize).saturating_sub(4);
-    let scroll = if selected_line >= items_visible {
-        selected_line.saturating_sub(items_visible) + 1
-    } else {
-        0
-    };
-
-    let search_display = if sel.query.is_empty() {
-        Line::from(Span::styled(" type to filter\u{2026}", app.theme.dim))
-    } else {
-        Line::from(vec![
-            Span::styled(" ", Style::default()),
-            Span::raw(sel.query.clone()),
-            Span::styled("\u{258f}", Style::default()),
-        ])
-    };
-
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
-    all_lines.push(search_display);
-    all_lines.push(Line::from(""));
-    all_lines.extend(content_lines.into_iter().skip(scroll).take(items_visible));
-    all_lines.push(Line::from(""));
-    all_lines.push(Line::from(Span::styled(
-        format!(" {}", footer),
-        app.theme.dim,
-    )));
-
-    frame.render_widget(Paragraph::new(all_lines), inner);
+    render_crepus_rows(
+        frame,
+        app,
+        area,
+        "model",
+        &lines,
+        Some("up/down select  enter confirm  s favorite  esc cancel"),
+    );
 }
 
 pub fn draw_agent_selector(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled() {
-        let area = popup_rect(frame.area());
-        app.layout.agent_selector = Some(area);
-        let sel = &app.agent_selector;
-        let visible = area.height.saturating_sub(4) as usize;
-        let start = scroll_start(sel.selected, visible);
-        let lines: Vec<CrepusLine> = sel
-            .entries
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(visible)
-            .map(|(i, e)| {
-                let text = format!("{}  {}", e.name, e.description);
-                if i == sel.selected {
-                    selected_line(text)
-                } else if e.name == sel.current {
-                    success_line(text)
-                } else {
-                    plain_line(text)
-                }
-            })
-            .collect();
-        render_crepus_rows(
-            frame,
-            app,
-            area,
-            "agent",
-            &lines,
-            Some("up/down select  enter confirm  esc cancel"),
-        );
-        return;
-    }
-
+    let area = popup_rect(frame.area());
+    app.layout.agent_selector = Some(area);
     let sel = &app.agent_selector;
-    if sel.entries.is_empty() {
-        return;
-    }
-
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-    for (i, entry) in sel.entries.iter().enumerate() {
-        let _is_current = entry.name == sel.current;
-        let is_sel = i == sel.selected;
-
-        let prefix = if is_sel { "\u{203a} " } else { "  " };
-        let marker_style = Style::default();
-
-        let name_style = if is_sel {
-            Style::default().add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-
-        let desc_style = app.theme.dim;
-
-        let mut spans = vec![Span::styled(format!("  {}", prefix), marker_style)];
-        spans.push(Span::styled(entry.name.clone(), name_style));
-        spans.push(Span::styled(format!("  {}", entry.description), desc_style));
-
-        content_lines.push(Line::from(spans));
-    }
-
-    let footer = "\u{2191}\u{2193} select  enter confirm  esc cancel";
-
-    let popup = popup_rect(frame.area());
-    app.layout.agent_selector = Some(popup);
-
-    frame.render_widget(Clear, popup);
-
-    let block = popup_block("agent", app.theme.accent, app.theme.muted_fg);
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
-    all_lines.extend(content_lines);
-    all_lines.push(Line::from(""));
-    all_lines.push(Line::from(Span::styled(
-        format!(" {}", footer),
-        app.theme.dim,
-    )));
-
-    frame.render_widget(Paragraph::new(all_lines), inner);
+    let visible = area.height.saturating_sub(4) as usize;
+    let start = scroll_start(sel.selected, visible);
+    let lines: Vec<CrepusLine> = sel
+        .entries
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(visible)
+        .map(|(i, e)| {
+            let text = format!("{}  {}", e.name, e.description);
+            if i == sel.selected {
+                selected_line(text)
+            } else if e.name == sel.current {
+                success_line(text)
+            } else {
+                plain_line(text)
+            }
+        })
+        .collect();
+    render_crepus_rows(
+        frame,
+        app,
+        area,
+        "agent",
+        &lines,
+        Some("up/down select  enter confirm  esc cancel"),
+    );
 }
 
 pub fn draw_command_palette(frame: &mut Frame, app: &mut App, input_area: Rect) {
-    if crepus_enabled() {
-        let palette = &app.command_palette;
-        if palette.filtered.is_empty() {
-            app.layout.command_palette = None;
-            return;
-        }
-        let area = anchored_popup(frame.area(), input_area, 72, palette.filtered.len());
-        app.layout.command_palette = Some(area);
-        let visible = area.height.saturating_sub(4) as usize;
-        let start = scroll_start(palette.selected, visible);
-        let mut lines = vec![muted_line(format!(
-            "/{}",
-            app.input.trim_start_matches('/')
-        ))];
-        lines.extend(
-            palette
-                .filtered
-                .iter()
-                .enumerate()
-                .skip(start)
-                .take(visible.saturating_sub(1))
-                .map(|(i, &idx)| {
-                    let entry = &palette.entries[idx];
-                    let prefix = if entry.kind == PaletteEntryKind::Skill {
-                        "◇ "
-                    } else {
-                        "/ "
-                    };
-                    let text = format!("{}{}  {}", prefix, entry.name, entry.description);
-                    if i == palette.selected {
-                        selected_line(text)
-                    } else {
-                        plain_line(text)
-                    }
-                }),
-        );
-        render_crepus_rows(frame, app, area, "commands", &lines, None);
-        return;
-    }
-
     let palette = &app.command_palette;
     if palette.filtered.is_empty() {
         app.layout.command_palette = None;
         return;
     }
-
-    let items: Vec<&crate::tui::widgets::PaletteEntry> = palette
-        .filtered
-        .iter()
-        .map(|&i| &palette.entries[i])
-        .collect();
-
-    let name_w = items.iter().map(|e| e.name.len()).max().unwrap_or(8) + 2;
-    let compact = input_area.width < 50;
-    let desc_w = if compact { 16 } else { 24 };
-
-    let content_width = items
-        .iter()
-        .map(|e| e.name.len() + e.description.len() + e.shortcut.len() + 12)
-        .max()
-        .unwrap_or(20) as u16;
-    let content_height = (items.len() as u16).min(8);
-
-    let box_width = (content_width + 2).min(input_area.width.saturating_sub(2));
-    let box_height = content_height + 2;
-
-    let popup_y = input_area.y.saturating_sub(box_height);
-    let popup = Rect::new(input_area.x + 1, popup_y, box_width, box_height);
-
-    app.layout.command_palette = Some(popup);
-
-    frame.render_widget(Clear, popup);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Indexed(8)));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let visible_count = inner.height as usize;
-    let scroll = if palette.selected >= visible_count {
-        palette.selected - visible_count + 1
-    } else {
-        0
-    };
-
-    let mut cmd_lines: Vec<Line<'static>> = Vec::new();
-    for (i, entry) in items.iter().enumerate().skip(scroll).take(visible_count) {
-        let is_sel = i == palette.selected;
-        let is_skill = entry.kind == PaletteEntryKind::Skill;
-        let prefix = if is_skill { "\u{25c7} " } else { "/ " };
-        let mut spans = if is_sel {
-            vec![
-                Span::styled(" \u{203a} ", Style::default()),
-                Span::styled(
-                    format!("{}{:<width$}", prefix, entry.name, width = name_w),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("{:<width$}", entry.description, width = desc_w),
-                    app.theme.dim,
-                ),
-            ]
-        } else {
-            vec![
-                Span::raw("   "),
-                Span::styled(
-                    format!("{}{:<width$}", prefix, entry.name, width = name_w),
-                    Style::default(),
-                ),
-                Span::styled(
-                    format!("{:<width$}", entry.description, width = desc_w),
-                    app.theme.dim,
-                ),
-            ]
-        };
-        if !entry.shortcut.is_empty() && !compact {
-            spans.push(Span::styled(entry.shortcut.clone(), app.theme.dim));
-        }
-        cmd_lines.push(Line::from(spans));
-    }
-
-    frame.render_widget(Paragraph::new(cmd_lines), inner);
-}
-
-pub fn draw_empty_state(app: &App, width: u16, height: u16) -> Vec<Line<'static>> {
-    let dim = app.theme.dim;
-    let compact = width < 55;
-
-    if compact {
-        let content: Vec<Line<'static>> = vec![
-            Line::from(vec![
-                Span::raw("  \u{25c6} "),
-                Span::styled("dot", Style::default().add_modifier(Modifier::BOLD)),
-            ]),
-            Line::from(Span::styled("  type a message to begin", dim)),
-        ];
-        let top = (height as usize).saturating_sub(content.len()) / 2;
-        let mut lines: Vec<Line<'static>> = (0..top).map(|_| Line::from("")).collect();
-        lines.extend(content);
-        return lines;
-    }
-
-    let art = [
-        "          @@@@@          ",
-        "          @@@@@          ",
-        "          @@@@@          ",
-        "                         ",
-        "@@@@@@@@@@@@@@@@@@@@@@@@@",
-        "@@@@@@@@@@@@@@@@@@@@@@@@@",
-        "@@@@@@@@@@@@@@@@@@@@@@@@@",
-    ];
-    let subtitle = "a terminal-native ai agent";
-    let sep = "\u{2500}".repeat(7);
-    let hints = "/help \u{00b7} /model \u{00b7} /sessions";
-
-    let content_height = art.len() + 7;
-    let top = (height as usize).saturating_sub(content_height) / 2;
-    let mut lines: Vec<Line<'static>> = (0..top).map(|_| Line::from("")).collect();
-
-    for a in &art {
-        lines.push(Line::from(Span::styled(*a, dim)).alignment(Alignment::Center));
-    }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(subtitle, dim)).alignment(Alignment::Center));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(sep, app.theme.border)).alignment(Alignment::Center));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(hints, dim)).alignment(Alignment::Center));
-    lines.push(Line::from(""));
-
-    lines
-}
-
-pub fn draw_thinking_selector(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled() {
-        let area = popup_rect(frame.area());
-        app.layout.thinking_selector = Some(area);
-        let lines: Vec<CrepusLine> = ThinkingLevel::all()
+    let area = anchored_popup(frame.area(), input_area, 72, palette.filtered.len());
+    app.layout.command_palette = Some(area);
+    let visible = area.height.saturating_sub(4) as usize;
+    let start = scroll_start(palette.selected, visible);
+    let mut lines = vec![muted_line(format!(
+        "/{}",
+        app.input.trim_start_matches('/')
+    ))];
+    lines.extend(
+        palette
+            .filtered
             .iter()
             .enumerate()
-            .map(|(i, level)| {
-                let text = format!("{}  {}", level.label(), level.description());
-                if i == app.thinking_selector.selected {
+            .skip(start)
+            .take(visible.saturating_sub(1))
+            .map(|(i, &idx)| {
+                let entry = &palette.entries[idx];
+                let prefix = if entry.kind == PaletteEntryKind::Skill {
+                    "◇ "
+                } else {
+                    "/ "
+                };
+                let text = format!("{}{}  {}", prefix, entry.name, entry.description);
+                if i == palette.selected {
                     selected_line(text)
-                } else if *level == app.thinking_selector.current {
-                    success_line(text)
                 } else {
                     plain_line(text)
                 }
-            })
-            .collect();
-        render_crepus_rows(
-            frame,
-            app,
-            area,
-            "thinking",
-            &lines,
-            Some("up/down select  enter confirm  esc cancel"),
-        );
-        return;
-    }
+            }),
+    );
+    render_crepus_rows(frame, app, area, "commands", &lines, None);
+}
 
-    let sel = &app.thinking_selector;
-    if !sel.visible {
-        return;
-    }
-
-    let levels = ThinkingLevel::all();
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-
-    for (i, &level) in levels.iter().enumerate() {
-        let _is_current = level == sel.current;
-        let is_sel = i == sel.selected;
-
-        let prefix = if is_sel { "\u{203a} " } else { "  " };
-        let marker_style = Style::default();
-
-        let name_style = if is_sel {
-            Style::default().add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-
-        let desc_style = app.theme.dim;
-
-        let mut spans = vec![Span::styled(format!("  {}", prefix), marker_style)];
-        spans.push(Span::styled(level.label().to_string(), name_style));
-        spans.push(Span::styled(
-            format!("  {}", level.description()),
-            desc_style,
-        ));
-
-        content_lines.push(Line::from(spans));
-    }
-
-    let footer = "\u{2191}\u{2193} select  enter confirm  esc cancel";
-
-    let popup = popup_rect(frame.area());
-    app.layout.thinking_selector = Some(popup);
-
-    frame.render_widget(Clear, popup);
-
-    let block = popup_block("thinking", app.theme.accent, app.theme.muted_fg);
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
-    all_lines.extend(content_lines);
-    all_lines.push(Line::from(""));
-    all_lines.push(Line::from(Span::styled(
-        format!(" {}", footer),
-        app.theme.dim,
-    )));
-
-    frame.render_widget(Paragraph::new(all_lines), inner);
+pub fn draw_thinking_selector(frame: &mut Frame, app: &mut App) {
+    let area = popup_rect(frame.area());
+    app.layout.thinking_selector = Some(area);
+    let lines: Vec<CrepusLine> = ThinkingLevel::all()
+        .iter()
+        .enumerate()
+        .map(|(i, level)| {
+            let text = format!("{}  {}", level.label(), level.description());
+            if i == app.thinking_selector.selected {
+                selected_line(text)
+            } else if *level == app.thinking_selector.current {
+                success_line(text)
+            } else {
+                plain_line(text)
+            }
+        })
+        .collect();
+    render_crepus_rows(
+        frame,
+        app,
+        area,
+        "thinking",
+        &lines,
+        Some("up/down select  enter confirm  esc cancel"),
+    );
 }
 
 pub fn draw_help_popup(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled() {
-        let area = popup_rect(frame.area());
-        app.layout.help_popup = Some(area);
-        let mut lines: Vec<CrepusLine> = vec![accent_line("commands")];
-        lines.extend(COMMANDS.iter().map(|c| {
-            let suffix = if c.shortcut.is_empty() {
-                String::new()
-            } else {
-                format!("  {}", c.shortcut)
-            };
-            plain_line(format!("/{:<12} {}{}", c.name, c.description, suffix))
-        }));
-        lines.push(empty_line());
-        lines.push(accent_line("navigation"));
-        if app.vim_mode {
-            lines.extend([
-                muted_line("j/k scroll up/down"),
-                muted_line("g/G top/bottom"),
-                muted_line("i/Esc insert/normal mode"),
-            ]);
+    let area = popup_rect(frame.area());
+    app.layout.help_popup = Some(area);
+    let mut lines: Vec<CrepusLine> = vec![accent_line("commands")];
+    lines.extend(COMMANDS.iter().map(|c| {
+        let suffix = if c.shortcut.is_empty() {
+            String::new()
         } else {
-            lines.extend([
-                muted_line("Up/Down scroll messages"),
-                muted_line("PgUp/PgDn page scroll"),
-                muted_line("^D half-page down"),
-            ]);
-        }
-        render_crepus_rows(frame, app, area, "help", &lines, Some("esc close"));
-        return;
-    }
-
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-
-    let heading = Style::default().add_modifier(Modifier::BOLD);
-    let key_style = Style::default();
-    let desc_style = app.theme.dim;
-
-    content_lines.push(Line::from(Span::styled(" commands", heading)));
-    content_lines.push(Line::from(""));
-    for c in COMMANDS {
-        let mut spans = vec![
-            Span::styled(format!("   /{:<12}", c.name), key_style),
-            Span::styled(c.description.to_string(), desc_style),
-        ];
-        if !c.shortcut.is_empty() {
-            let pad = 24usize.saturating_sub(c.description.len());
-            spans.push(Span::styled(" ".repeat(pad), desc_style));
-            spans.push(Span::styled(c.shortcut.to_string(), app.theme.dim));
-        }
-        content_lines.push(Line::from(spans));
-    }
-
-    content_lines.push(Line::from(""));
+            format!("  {}", c.shortcut)
+        };
+        plain_line(format!("/{:<12} {}{}", c.name, c.description, suffix))
+    }));
+    lines.push(empty_line());
+    lines.push(accent_line("navigation"));
     if app.vim_mode {
-        content_lines.push(Line::from(Span::styled(" navigation", heading)));
-        content_lines.push(Line::from(""));
-        for (key, desc) in [
-            ("j/k", "scroll up/down"),
-            ("g/G", "top/bottom"),
-            ("^D/^U", "half-page scroll"),
-            ("i/Esc", "insert/normal mode"),
-            ("t", "toggle thinking"),
-            ("q", "quit"),
-        ] {
-            content_lines.push(Line::from(vec![
-                Span::styled(format!("   {:<14}", key), key_style),
-                Span::styled(desc, desc_style),
-            ]));
-        }
+        lines.extend([
+            muted_line("j/k scroll up/down"),
+            muted_line("g/G top/bottom"),
+            muted_line("i/Esc insert/normal mode"),
+        ]);
     } else {
-        content_lines.push(Line::from(Span::styled(" navigation", heading)));
-        content_lines.push(Line::from(""));
-        for (key, desc) in [
-            ("Up/Down", "scroll messages"),
-            ("PgUp/PgDn", "page scroll"),
-            ("^D", "half-page down"),
-        ] {
-            content_lines.push(Line::from(vec![
-                Span::styled(format!("   {:<14}", key), key_style),
-                Span::styled(desc, desc_style),
-            ]));
-        }
+        lines.extend([
+            muted_line("Up/Down scroll messages"),
+            muted_line("PgUp/PgDn page scroll"),
+            muted_line("^D half-page down"),
+        ]);
     }
-
-    content_lines.push(Line::from(""));
-    content_lines.push(Line::from(Span::styled(" editing", heading)));
-    content_lines.push(Line::from(""));
-    for (key, desc) in [
-        ("^A/^E", "start/end of line"),
-        ("^W", "delete word"),
-        ("^K/^U", "delete to end/start"),
-        ("^C", "clear input or quit"),
-    ] {
-        content_lines.push(Line::from(vec![
-            Span::styled(format!("   {:<14}", key), key_style),
-            Span::styled(desc, desc_style),
-        ]));
-    }
-
-    let footer = "esc close";
-
-    let popup = popup_rect(frame.area());
-    app.layout.help_popup = Some(popup);
-
-    frame.render_widget(Clear, popup);
-
-    let block = popup_block("help", app.theme.accent, app.theme.muted_fg);
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
-    all_lines.extend(content_lines);
-    all_lines.push(Line::from(""));
-    all_lines.push(Line::from(Span::styled(
-        format!(" {}", footer),
-        app.theme.dim,
-    )));
-
-    frame.render_widget(Paragraph::new(all_lines), inner);
+    render_crepus_rows(frame, app, area, "help", &lines, Some("esc close"));
 }
 
 pub fn draw_session_selector(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled() {
-        let area = popup_rect(frame.area());
-        app.layout.session_selector = Some(area);
-        let sel = &app.session_selector;
-        let visible = area.height.saturating_sub(4) as usize;
-        let start = scroll_start(sel.selected, visible);
-        let mut lines = vec![muted_line(if sel.query.is_empty() {
-            "type to filter...".to_string()
-        } else {
-            format!("filter: {}", sel.query)
-        })];
-        for (item, &idx) in sel
-            .filtered
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(visible.saturating_sub(1))
-        {
-            let entry = &app.session_selector.entries[idx];
-            let text = format!("{}  {}", entry.title, entry.subtitle);
-            if item == sel.selected {
-                lines.push(selected_line(text));
-            } else {
-                lines.push(plain_line(text));
-            }
-        }
-        if sel.filtered.is_empty() && !sel.query.is_empty() {
-            lines.push(muted_line("no matches"));
-        } else if sel.entries.is_empty() {
-            lines.push(muted_line("no sessions in this directory"));
-        }
-        render_crepus_rows(
-            frame,
-            app,
-            area,
-            "sessions",
-            &lines,
-            Some("up/down select  enter resume  esc cancel"),
-        );
-        return;
-    }
-
+    let area = popup_rect(frame.area());
+    app.layout.session_selector = Some(area);
     let sel = &app.session_selector;
-    if !sel.visible {
-        return;
-    }
-
-    let popup = popup_rect(frame.area());
-    app.layout.session_selector = Some(popup);
-
-    frame.render_widget(Clear, popup);
-
-    let block = popup_block("sessions", app.theme.accent, app.theme.muted_fg);
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-
-    for (item_idx, &entry_idx) in sel.filtered.iter().enumerate() {
-        let entry = &sel.entries[entry_idx];
-        let is_sel = item_idx == sel.selected;
-
-        let (prefix, title_style) = if is_sel {
-            ("\u{203a} ", Style::default().add_modifier(Modifier::BOLD))
+    let visible = area.height.saturating_sub(4) as usize;
+    let start = scroll_start(sel.selected, visible);
+    let mut lines = vec![muted_line(if sel.query.is_empty() {
+        "type to filter...".to_string()
+    } else {
+        format!("filter: {}", sel.query)
+    })];
+    for (item, &idx) in sel
+        .filtered
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(visible.saturating_sub(1))
+    {
+        let entry = &app.session_selector.entries[idx];
+        let text = format!("{}  {}", entry.title, entry.subtitle);
+        if item == sel.selected {
+            lines.push(selected_line(text));
         } else {
-            ("  ", Style::default())
-        };
-
-        let sub_style = app.theme.dim;
-
-        content_lines.push(Line::from(vec![
-            Span::styled(format!("  {}", prefix), Style::default()),
-            Span::styled(entry.title.clone(), title_style),
-            Span::styled(format!("  {}", entry.subtitle), sub_style),
-        ]));
+            lines.push(plain_line(text));
+        }
     }
-
     if sel.filtered.is_empty() && !sel.query.is_empty() {
-        content_lines.push(Line::from(Span::styled(" no matches", app.theme.dim)));
+        lines.push(muted_line("no matches"));
     } else if sel.entries.is_empty() {
-        content_lines.push(Line::from(Span::styled(
-            " no sessions in this directory",
-            app.theme.dim,
-        )));
+        lines.push(muted_line("no sessions in this directory"));
     }
-
-    let footer = "\u{2191}\u{2193} select  enter resume  esc cancel";
-
-    let items_visible = (inner.height as usize).saturating_sub(4);
-    let scroll = if sel.selected >= items_visible {
-        sel.selected.saturating_sub(items_visible) + 1
-    } else {
-        0
-    };
-
-    let search_display = if sel.query.is_empty() {
-        Line::from(Span::styled(" type to filter\u{2026}", app.theme.dim))
-    } else {
-        Line::from(vec![
-            Span::styled(" ", Style::default()),
-            Span::raw(sel.query.clone()),
-            Span::styled("\u{258f}", Style::default()),
-        ])
-    };
-
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
-    all_lines.push(search_display);
-    all_lines.push(Line::from(""));
-    all_lines.extend(content_lines.into_iter().skip(scroll).take(items_visible));
-    all_lines.push(Line::from(""));
-    all_lines.push(Line::from(Span::styled(
-        format!(" {}", footer),
-        app.theme.dim,
-    )));
-
-    frame.render_widget(Paragraph::new(all_lines), inner);
+    render_crepus_rows(
+        frame,
+        app,
+        area,
+        "sessions",
+        &lines,
+        Some("up/down select  enter resume  esc cancel"),
+    );
 }
 
 pub fn draw_context_menu(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled() {
-        let labels = crate::tui::widgets::MessageContextMenu::labels();
-        let width = labels.iter().map(|l| l.len()).max().unwrap_or(10) as u16 + 6;
-        let height = labels.len() as u16 + 4;
-        let area = Rect::new(
-            app.context_menu
-                .screen_x
-                .min(frame.area().width.saturating_sub(width)),
-            app.context_menu
-                .screen_y
-                .min(frame.area().height.saturating_sub(height)),
-            width.min(frame.area().width.saturating_sub(2)),
-            height.min(frame.area().height.saturating_sub(2)),
-        );
-        app.layout.context_menu = Some(area);
-        let lines: Vec<CrepusLine> = labels
-            .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                if i == app.context_menu.selected {
-                    selected_line(*s)
-                } else {
-                    plain_line(*s)
-                }
-            })
-            .collect();
-        render_crepus_rows(frame, app, area, "menu", &lines, None);
-        return;
-    }
-
-    let menu = &app.context_menu;
-    if !menu.visible {
-        return;
-    }
-
     let labels = crate::tui::widgets::MessageContextMenu::labels();
-    let content_width = labels.iter().map(|l| l.len()).max().unwrap_or(10) + 6;
-    let content_height = labels.len() as u16 + 2;
-    let box_width = (content_width as u16).min(frame.area().width.saturating_sub(2));
-    let box_height = content_height;
-
-    let x = menu
-        .screen_x
-        .min(frame.area().width.saturating_sub(box_width));
-    let y = menu
-        .screen_y
-        .min(frame.area().height.saturating_sub(box_height));
-    let popup = Rect::new(x, y, box_width, box_height);
-    app.layout.context_menu = Some(popup);
-
-    frame.render_widget(Clear, popup);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Indexed(8)));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    for (i, label) in labels.iter().enumerate() {
-        let is_sel = i == menu.selected;
-        let style = if is_sel {
-            Style::default().add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        let prefix = if is_sel { " \u{203a} " } else { "   " };
-        lines.push(Line::from(Span::styled(
-            format!("{}{}", prefix, label),
-            style,
-        )));
-    }
-
-    frame.render_widget(Paragraph::new(lines), inner);
+    let width = labels.iter().map(|l| l.len()).max().unwrap_or(10) as u16 + 6;
+    let height = labels.len() as u16 + 4;
+    let area = Rect::new(
+        app.context_menu
+            .screen_x
+            .min(frame.area().width.saturating_sub(width)),
+        app.context_menu
+            .screen_y
+            .min(frame.area().height.saturating_sub(height)),
+        width.min(frame.area().width.saturating_sub(2)),
+        height.min(frame.area().height.saturating_sub(2)),
+    );
+    app.layout.context_menu = Some(area);
+    let lines: Vec<CrepusLine> = labels
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            if i == app.context_menu.selected {
+                selected_line(*s)
+            } else {
+                plain_line(*s)
+            }
+        })
+        .collect();
+    render_crepus_rows(frame, app, area, "menu", &lines, None);
 }
 
 pub fn draw_question_popup(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled()
-        && let Some(pq) = app.pending_question.as_ref()
-    {
-        let area = popup_rect(frame.area());
-        app.layout.question_popup = Some(area);
-        let mut lines = vec![plain_line(pq.question.clone()), empty_line()];
-        for (i, opt) in pq.options.iter().enumerate() {
-            if i == pq.selected {
-                lines.push(selected_line(opt.clone()));
-            } else {
-                lines.push(plain_line(opt.clone()));
-            }
-        }
-        let custom = if pq.custom_input.is_empty() {
-            "type your answer...".to_string()
-        } else {
-            pq.custom_input.clone()
-        };
-        if pq.selected >= pq.options.len() {
-            lines.push(selected_line(custom));
-        } else {
-            lines.push(muted_line(custom));
-        }
-        render_crepus_rows(
-            frame,
-            app,
-            area,
-            "question",
-            &lines,
-            Some("up/down select  enter confirm  esc cancel"),
-        );
+    let Some(pq) = app.pending_question.as_ref() else {
         return;
-    }
-
-    let pq = match app.pending_question.as_ref() {
-        Some(q) => q,
-        None => return,
     };
-
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-    content_lines.push(Line::from(Span::styled(
-        format!(" {}", pq.question),
-        Style::default(),
-    )));
-    content_lines.push(Line::from(""));
-
+    let area = popup_rect(frame.area());
+    app.layout.question_popup = Some(area);
+    let mut lines = vec![plain_line(pq.question.clone()), empty_line()];
     for (i, opt) in pq.options.iter().enumerate() {
-        let is_sel = i == pq.selected;
-        let (prefix, style) = if is_sel {
-            ("\u{203a} ", Style::default().add_modifier(Modifier::BOLD))
+        if i == pq.selected {
+            lines.push(selected_line(opt.clone()));
         } else {
-            ("  ", Style::default())
-        };
-        content_lines.push(Line::from(Span::styled(
-            format!("  {}{}", prefix, opt),
-            style,
-        )));
+            lines.push(plain_line(opt.clone()));
+        }
     }
-
-    let custom_sel = pq.selected >= pq.options.len();
-    let custom_style = if custom_sel {
-        Style::default().add_modifier(Modifier::BOLD)
+    let custom = if pq.custom_input.is_empty() {
+        "type your answer...".to_string()
     } else {
-        app.theme.dim
+        pq.custom_input.clone()
     };
-    let custom_text = if pq.custom_input.is_empty() {
-        "type your answer\u{2026}".to_string()
+    if pq.selected >= pq.options.len() {
+        lines.push(selected_line(custom));
     } else {
-        format!("{}\u{258f}", pq.custom_input)
-    };
-    content_lines.push(Line::from(vec![
-        Span::styled(
-            if custom_sel { "  \u{203a} " } else { "    " },
-            Style::default(),
-        ),
-        Span::styled(custom_text, custom_style),
-    ]));
-
-    let footer = "\u{2191}\u{2193} select  enter confirm  esc cancel";
-
-    let popup = popup_rect(frame.area());
-    app.layout.question_popup = Some(popup);
-
-    frame.render_widget(Clear, popup);
-
-    let block = popup_block("question", app.theme.accent, app.theme.muted_fg);
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
-    all_lines.extend(content_lines);
-    all_lines.push(Line::from(""));
-    all_lines.push(Line::from(Span::styled(
-        format!(" {}", footer),
-        app.theme.dim,
-    )));
-
-    frame.render_widget(Paragraph::new(all_lines), inner);
+        lines.push(muted_line(custom));
+    }
+    render_crepus_rows(
+        frame,
+        app,
+        area,
+        "question",
+        &lines,
+        Some("up/down select  enter confirm  esc cancel"),
+    );
 }
 
 pub fn draw_permission_popup(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled()
-        && let Some(p) = app.pending_permission.as_ref()
-    {
-        let area = popup_rect(frame.area());
-        app.layout.permission_popup = Some(area);
-        let mut lines = vec![
-            accent_line(format!("Allow {}?", p.tool_name)),
-            muted_line(p.input_summary.clone()),
-            empty_line(),
-        ];
-        for (idx, label) in ["Allow", "Deny"].iter().enumerate() {
-            if idx == p.selected {
-                lines.push(selected_line(*label));
-            } else {
-                lines.push(plain_line(*label));
-            }
-        }
-        render_crepus_rows(
-            frame,
-            app,
-            area,
-            "permission",
-            &lines,
-            Some("y allow  n deny  esc cancel"),
-        );
+    let Some(p) = app.pending_permission.as_ref() else {
         return;
-    }
-
-    let pp = match app.pending_permission.as_ref() {
-        Some(p) => p,
-        None => return,
     };
-
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-    content_lines.push(Line::from(Span::styled(
-        format!(" Allow {}?", pp.tool_name),
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
-    content_lines.push(Line::from(Span::styled(
-        format!(" {}", &pp.input_summary[..pp.input_summary.len().min(60)]),
-        app.theme.dim,
-    )));
-    content_lines.push(Line::from(""));
-
-    let labels = ["Allow", "Deny"];
-    for (i, label) in labels.iter().enumerate() {
-        let is_sel = i == pp.selected;
-        let (prefix, style) = if is_sel {
-            ("\u{203a} ", Style::default().add_modifier(Modifier::BOLD))
+    let area = popup_rect(frame.area());
+    app.layout.permission_popup = Some(area);
+    let mut lines = vec![
+        accent_line(format!("Allow {}?", p.tool_name)),
+        muted_line(p.input_summary.clone()),
+        empty_line(),
+    ];
+    for (idx, label) in ["Allow", "Deny"].iter().enumerate() {
+        if idx == p.selected {
+            lines.push(selected_line(*label));
         } else {
-            ("  ", Style::default())
-        };
-        content_lines.push(Line::from(Span::styled(
-            format!("  {}{}", prefix, label),
-            style,
-        )));
+            lines.push(plain_line(*label));
+        }
     }
-
-    let footer = "y allow  n deny  esc cancel";
-
-    let popup = popup_rect(frame.area());
-    app.layout.permission_popup = Some(popup);
-
-    frame.render_widget(Clear, popup);
-
-    let block = popup_block("permission", app.theme.accent, app.theme.muted_fg);
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
-    all_lines.extend(content_lines);
-    all_lines.push(Line::from(""));
-    all_lines.push(Line::from(Span::styled(
-        format!(" {}", footer),
-        app.theme.dim,
-    )));
-
-    frame.render_widget(Paragraph::new(all_lines), inner);
+    render_crepus_rows(
+        frame,
+        app,
+        area,
+        "permission",
+        &lines,
+        Some("y allow  n deny  esc cancel"),
+    );
 }
 
 pub fn draw_rename_popup(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled() {
-        let area = centered_popup(frame.area(), 48, 7);
-        let lines = vec![selected_line(if app.rename_input.is_empty() {
-            "session title".to_string()
-        } else {
-            app.rename_input.clone()
-        })];
-        render_crepus_rows(
-            frame,
-            app,
-            area,
-            "rename",
-            &lines,
-            Some("enter save  esc cancel"),
-        );
-        return;
-    }
-
-    let footer = "enter save  esc cancel";
-    let display = format!("{}\u{258f}", app.rename_input);
-    let content_lines: Vec<Line<'static>> = vec![Line::from(vec![
-        Span::raw(" "),
-        Span::styled(display, Style::default()),
-    ])];
-    let popup = popup_rect(frame.area());
-    frame.render_widget(Clear, popup);
-    let block = popup_block("rename session", app.theme.accent, app.theme.muted_fg);
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
-    all_lines.extend(content_lines);
-    all_lines.push(Line::from(""));
-    all_lines.push(Line::from(Span::styled(
-        format!(" {}", footer),
-        app.theme.dim,
-    )));
-    frame.render_widget(Paragraph::new(all_lines), inner);
+    let area = centered_popup(frame.area(), 48, 7);
+    let lines = vec![selected_line(if app.rename_input.is_empty() {
+        "session title".to_string()
+    } else {
+        app.rename_input.clone()
+    })];
+    render_crepus_rows(
+        frame,
+        app,
+        area,
+        "rename",
+        &lines,
+        Some("enter save  esc cancel"),
+    );
 }
 
 pub fn draw_file_picker(frame: &mut Frame, app: &mut App, input_area: Rect) {
-    if crepus_enabled() {
-        let picker = &app.file_picker;
-        if picker.filtered.is_empty() {
-            app.layout.file_picker = None;
-            return;
-        }
-        let area = anchored_popup(frame.area(), input_area, 72, picker.filtered.len());
-        app.layout.file_picker = Some(area);
-        let visible = area.height.saturating_sub(4) as usize;
-        let start = scroll_start(picker.selected, visible);
-        let mut lines = vec![muted_line(if picker.query.is_empty() {
-            "type to filter files...".to_string()
-        } else {
-            format!("filter: {}", picker.query)
-        })];
-        for (item, &idx) in picker
-            .filtered
-            .iter()
-            .enumerate()
-            .skip(start)
-            .take(visible.saturating_sub(1))
-        {
-            let entry = &app.file_picker.entries[idx];
-            let display = if entry.is_dir {
-                format!("{}/", entry.path)
-            } else {
-                entry.path.clone()
-            };
-            if item == picker.selected {
-                lines.push(selected_line(display));
-            } else if entry.is_dir {
-                lines.push(accent_line(display));
-            } else {
-                lines.push(plain_line(display));
-            }
-        }
-        render_crepus_rows(frame, app, area, "files", &lines, None);
-        return;
-    }
-
     let picker = &app.file_picker;
     if picker.filtered.is_empty() {
         app.layout.file_picker = None;
         return;
     }
-
-    let items: Vec<&crate::tui::widgets::FilePickerEntry> = picker
+    let area = anchored_popup(frame.area(), input_area, 72, picker.filtered.len());
+    app.layout.file_picker = Some(area);
+    let visible = area.height.saturating_sub(4) as usize;
+    let start = scroll_start(picker.selected, visible);
+    let mut lines = vec![muted_line(if picker.query.is_empty() {
+        "type to filter files...".to_string()
+    } else {
+        format!("filter: {}", picker.query)
+    })];
+    for (item, &idx) in picker
         .filtered
         .iter()
-        .map(|&i| &picker.entries[i])
-        .collect();
-
-    let content_width = items.iter().map(|e| e.path.len() + 8).max().unwrap_or(20) as u16;
-    let content_height = items.len().min(12) as u16;
-
-    let box_width = (content_width + 2).min(input_area.width.saturating_sub(2));
-    let box_height = content_height + 2;
-
-    let popup_y = input_area.y.saturating_sub(box_height);
-    let popup = Rect::new(input_area.x + 1, popup_y, box_width, box_height);
-
-    app.layout.file_picker = Some(popup);
-
-    frame.render_widget(Clear, popup);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Indexed(8)));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let visible_count = inner.height as usize;
-    let scroll = if picker.selected >= visible_count {
-        picker.selected - visible_count + 1
-    } else {
-        0
-    };
-
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    for (i, entry) in items.iter().enumerate().skip(scroll).take(visible_count) {
-        let is_sel = i == picker.selected;
-        let icon = if entry.is_dir { "\u{203a} " } else { "  " };
+        .enumerate()
+        .skip(start)
+        .take(visible.saturating_sub(1))
+    {
+        let entry = &app.file_picker.entries[idx];
         let display = if entry.is_dir {
             format!("{}/", entry.path)
         } else {
             entry.path.clone()
         };
-        if is_sel {
-            lines.push(Line::from(vec![
-                Span::styled(" \u{203a} ", Style::default()),
-                Span::styled(
-                    format!("{}{}", icon, display),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-            ]));
+        if item == picker.selected {
+            lines.push(selected_line(display));
+        } else if entry.is_dir {
+            lines.push(accent_line(display));
         } else {
-            lines.push(Line::from(vec![
-                Span::raw("   "),
-                Span::styled(
-                    format!("{}{}", icon, display),
-                    if entry.is_dir {
-                        app.theme.dim
-                    } else {
-                        Style::default()
-                    },
-                ),
-            ]));
+            lines.push(plain_line(display));
         }
     }
-
-    frame.render_widget(Paragraph::new(lines), inner);
+    render_crepus_rows(frame, app, area, "files", &lines, None);
 }
 
 pub fn draw_login_popup(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled() {
-        let lp = &app.login_popup;
-        let (title, hint) = match lp.step {
-            LoginStep::SelectProvider => ("login", "esc cancel  ↑↓ navigate  enter select"),
-            LoginStep::SelectMethod => ("anthropic", "esc back  ↑↓ navigate  enter select"),
-            LoginStep::EnterApiKey => ("enter api key", "esc back  enter submit"),
-            LoginStep::OAuthWaiting => ("authorize", "esc cancel  enter submit code"),
-            LoginStep::OAuthExchanging => ("exchanging...", "esc cancel"),
-        };
-
-        let area = popup_rect(frame.area());
-        app.layout.login_popup = Some(area);
-        let mut lines: Vec<CrepusLine> = vec![empty_line()];
-
-        if lp.step == LoginStep::OAuthWaiting {
-            lines.push(accent_line("browser opened for authorization"));
-            lines.push(empty_line());
-            lines.push(plain_line("paste the URL or code after authorizing:"));
-            lines.push(empty_line());
-            let display = if lp.code_input.is_empty() {
-                "paste code here...".to_string()
-            } else if lp.code_input.len() > 40 {
-                format!("{}...", &lp.code_input[..37])
-            } else {
-                lp.code_input.clone()
-            };
-            lines.push(selected_line(display));
-        } else if lp.step == LoginStep::OAuthExchanging {
-            lines.push(accent_line("exchanging code for credentials..."));
-        } else if lp.step == LoginStep::EnterApiKey {
-            let provider = lp.provider.as_deref().unwrap_or("provider");
-            lines.push(accent_line(format!("{} API key", provider)));
-            lines.push(empty_line());
-            let masked = "•".repeat(lp.key_input.len());
-            lines.push(selected_line(if masked.is_empty() {
-                "paste or type your key...".to_string()
-            } else {
-                masked
-            }));
-        } else {
-            let items: Vec<(&str, bool)> = match lp.step {
-                LoginStep::SelectProvider => LoginPopup::providers()
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| (*p, i == lp.selected))
-                    .collect(),
-                LoginStep::SelectMethod => LoginPopup::anthropic_methods()
-                    .iter()
-                    .enumerate()
-                    .map(|(i, m)| (*m, i == lp.selected))
-                    .collect(),
-                _ => Vec::new(),
-            };
-            for (label, selected) in &items {
-                if *selected {
-                    lines.push(selected_line(*label));
-                } else {
-                    lines.push(plain_line(*label));
-                }
-            }
-        }
-
-        render_crepus_rows(frame, app, area, title, &lines, Some(hint));
-        return;
-    }
-
     let lp = &app.login_popup;
-    let accent = app.theme.accent;
-    let muted = app.theme.muted_fg;
-
     let (title, hint) = match lp.step {
-        LoginStep::SelectProvider => (
-            "login",
-            "esc cancel  \u{2191}\u{2193} navigate  enter select",
-        ),
-        LoginStep::SelectMethod => (
-            "anthropic",
-            "esc back  \u{2191}\u{2193} navigate  enter select",
-        ),
+        LoginStep::SelectProvider => ("login", "esc cancel  ↑↓ navigate  enter select"),
+        LoginStep::SelectMethod => ("anthropic", "esc back  ↑↓ navigate  enter select"),
         LoginStep::EnterApiKey => ("enter api key", "esc back  enter submit"),
         LoginStep::OAuthWaiting => ("authorize", "esc cancel  enter submit code"),
         LoginStep::OAuthExchanging => ("exchanging...", "esc cancel"),
     };
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(""));
+    let area = popup_rect(frame.area());
+    app.layout.login_popup = Some(area);
+    let mut lines: Vec<CrepusLine> = vec![empty_line()];
 
     if lp.step == LoginStep::OAuthWaiting {
-        lines.push(Line::from(Span::styled(
-            "  browser opened for authorization",
-            Style::default().fg(accent),
-        )));
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  paste the URL or code after authorizing:",
-            Style::default(),
-        )));
-        lines.push(Line::from(""));
-        let display: String = if lp.code_input.is_empty() {
+        lines.push(accent_line("browser opened for authorization"));
+        lines.push(empty_line());
+        lines.push(plain_line("paste the URL or code after authorizing:"));
+        lines.push(empty_line());
+        let display = if lp.code_input.is_empty() {
             "paste code here...".to_string()
+        } else if lp.code_input.len() > 40 {
+            format!("{}...", &lp.code_input[..37])
         } else {
-            let len = lp.code_input.len();
-            if len > 40 {
-                format!("{}...", &lp.code_input[..37])
-            } else {
-                lp.code_input.clone()
-            }
+            lp.code_input.clone()
         };
-        lines.push(Line::from(vec![
-            Span::styled("  \u{203a} ", Style::default().fg(accent)),
-            Span::styled(
-                display,
-                if lp.code_input.is_empty() {
-                    Style::default().fg(muted)
-                } else {
-                    Style::default()
-                },
-            ),
-        ]));
+        lines.push(selected_line(display));
     } else if lp.step == LoginStep::OAuthExchanging {
-        lines.push(Line::from(Span::styled(
-            "  exchanging code for credentials...",
-            Style::default().fg(accent),
-        )));
+        lines.push(accent_line("exchanging code for credentials..."));
     } else if lp.step == LoginStep::EnterApiKey {
         let provider = lp.provider.as_deref().unwrap_or("provider");
-        lines.push(Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled(format!("{} API key", provider), Style::default().fg(accent)),
-        ]));
-        lines.push(Line::from(""));
-        let masked: String = "\u{2022}".repeat(lp.key_input.len());
-        lines.push(Line::from(vec![
-            Span::styled("  \u{203a} ", Style::default().fg(accent)),
-            Span::styled(
-                if masked.is_empty() {
-                    "paste or type your key...".to_string()
-                } else {
-                    masked
-                },
-                if lp.key_input.is_empty() {
-                    Style::default().fg(muted)
-                } else {
-                    Style::default()
-                },
-            ),
-        ]));
+        lines.push(accent_line(format!("{} API key", provider)));
+        lines.push(empty_line());
+        let masked = "•".repeat(lp.key_input.len());
+        lines.push(selected_line(if masked.is_empty() {
+            "paste or type your key...".to_string()
+        } else {
+            masked
+        }));
     } else {
         let items: Vec<(&str, bool)> = match lp.step {
             LoginStep::SelectProvider => LoginPopup::providers()
@@ -1461,235 +549,67 @@ pub fn draw_login_popup(frame: &mut Frame, app: &mut App) {
         };
         for (label, selected) in &items {
             if *selected {
-                lines.push(Line::from(vec![
-                    Span::styled("  \u{203a} ", Style::default().fg(accent)),
-                    Span::styled(
-                        label.to_string(),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                ]));
+                lines.push(selected_line(*label));
             } else {
-                lines.push(Line::from(vec![
-                    Span::styled("    ", Style::default()),
-                    Span::styled(label.to_string(), Style::default()),
-                ]));
+                lines.push(plain_line(*label));
             }
         }
     }
 
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("  {}", hint),
-        Style::default().fg(muted),
-    )));
-
-    let area = popup_rect(frame.area());
-
-    let block = popup_block(title, accent, muted);
-    frame.render_widget(Clear, area);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    frame.render_widget(Paragraph::new(lines), inner);
-    app.layout.login_popup = Some(area);
+    render_crepus_rows(frame, app, area, title, &lines, Some(hint));
 }
 
 pub fn draw_welcome_screen(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled() {
-        frame.render_widget(Clear, frame.area());
-        let choices = WelcomeScreen::choices();
-        let area = centered_popup(frame.area(), 54, choices.len() * 2 + 7);
-        app.layout.welcome_screen = Some(area);
-        let mut lines = vec![
-            accent_line("dot"),
-            muted_line("minimal ai agent"),
-            empty_line(),
-        ];
-        lines.extend(choices.iter().enumerate().flat_map(|(i, (label, desc))| {
-            let first = if i == app.welcome_screen.selected {
-                selected_line(*label)
-            } else {
-                plain_line(*label)
-            };
-            [first, muted_line(format!("  {}", desc))]
-        }));
-        render_crepus_rows(
-            frame,
-            app,
-            area,
-            "welcome",
-            &lines,
-            Some("up/down navigate  enter select  esc dismiss"),
-        );
-        return;
-    }
-
-    let accent = app.theme.accent;
-    let muted = app.theme.muted_fg;
-    let dim = Style::default().fg(Color::Indexed(8));
-
-    let inner_w: usize = 52;
-    let sep: String = "\u{2500}".repeat(inner_w);
-
-    let mut lines: Vec<Line<'static>> = vec![
-        Line::from(""),
-        Line::from(""),
-        Line::from(Span::styled(
-            "dot",
-            Style::default().fg(accent).add_modifier(Modifier::BOLD),
-        ))
-        .alignment(Alignment::Center),
-        Line::from(Span::styled("minimal ai agent", dim)).alignment(Alignment::Center),
-        Line::from(""),
-        Line::from(Span::styled(sep, dim)),
-        Line::from(""),
-        Line::from(Span::styled("get started", Style::default())).alignment(Alignment::Center),
-        Line::from(""),
-    ];
-
+    frame.render_widget(Clear, frame.area());
     let choices = WelcomeScreen::choices();
-    for (i, (label, desc)) in choices.iter().enumerate() {
-        let selected = i == app.welcome_screen.selected;
-        let (prefix, label_style) = if selected {
-            (
-                Span::styled("  \u{203a} ", Style::default().fg(accent)),
-                Style::default().add_modifier(Modifier::BOLD),
-            )
-        } else {
-            (Span::styled("    ", Style::default()), Style::default())
-        };
-        lines.push(Line::from(vec![
-            prefix,
-            Span::styled(label.to_string(), label_style),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("      ", Style::default()),
-            Span::styled(desc.to_string(), Style::default().fg(muted)),
-        ]));
-        if i < choices.len() - 1 {
-            lines.push(Line::from(""));
-        }
-    }
-
-    lines.push(Line::from(""));
-    lines.push(
-        Line::from(Span::styled(
-            "\u{2191}\u{2193} navigate   enter select   esc dismiss",
-            Style::default().fg(muted),
-        ))
-        .alignment(Alignment::Center),
-    );
-    lines.push(Line::from(""));
-
-    let full = frame.area();
-    frame.render_widget(Clear, full);
-
-    let content_height = lines.len() + 2;
-    let content_width = 54;
-    let area = centered_popup(full, content_width, content_height);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(accent));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    frame.render_widget(Paragraph::new(lines), inner);
+    let area = centered_popup(frame.area(), 54, choices.len() * 2 + 7);
     app.layout.welcome_screen = Some(area);
+    let mut lines = vec![
+        accent_line("dot"),
+        muted_line("minimal ai agent"),
+        empty_line(),
+    ];
+    lines.extend(choices.iter().enumerate().flat_map(|(i, (label, desc))| {
+        let first = if i == app.welcome_screen.selected {
+            selected_line(*label)
+        } else {
+            plain_line(*label)
+        };
+        [first, muted_line(format!("  {}", desc))]
+    }));
+    render_crepus_rows(
+        frame,
+        app,
+        area,
+        "welcome",
+        &lines,
+        Some("up/down navigate  enter select  esc dismiss"),
+    );
 }
 
 pub fn draw_aside_popup(frame: &mut Frame, app: &mut App) {
-    if crepus_enabled() {
-        let area = centered_popup(frame.area(), 80, 18);
-        app.layout.aside_popup = Some(area);
-        let mut lines = vec![accent_line(app.aside_popup.question.clone())];
-        lines.push(empty_line());
-        if app.aside_popup.response.is_empty() && !app.aside_popup.done {
-            lines.push(muted_line("thinking..."));
-        } else {
-            let height = area.height.saturating_sub(5) as usize;
-            let start = app.aside_popup.scroll_offset as usize;
-            lines.extend(
-                app.aside_popup
-                    .response
-                    .lines()
-                    .skip(start)
-                    .take(height)
-                    .map(|line| plain_line(line.to_string())),
-            );
-        }
-        let hint = if app.aside_popup.done {
-            "esc/space dismiss  up/down scroll"
-        } else {
-            "esc dismiss  streaming..."
-        };
-        render_crepus_rows(frame, app, area, "aside", &lines, Some(hint));
-        return;
-    }
-
-    let accent = app.theme.accent;
-    let muted = app.theme.muted_fg;
-    let full = frame.area();
-
-    let popup_width = (full.width * 3 / 4).clamp(40, 80) as usize;
-    let popup_max_height = (full.height * 3 / 4).max(10) as usize;
-
-    let mut lines: Vec<Line<'static>> = Vec::new();
-
-    lines.push(Line::from(Span::styled(
-        app.aside_popup.question.clone(),
-        Style::default().fg(accent).add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(""));
-
-    if app.aside_popup.response.is_empty() && !app.aside_popup.done {
-        lines.push(Line::from(Span::styled(
-            "thinking...",
-            Style::default().fg(muted),
-        )));
-    } else {
-        let wrap_width = popup_width.saturating_sub(4);
-        for line in app.aside_popup.response.lines() {
-            if line.is_empty() {
-                lines.push(Line::from(""));
-            } else {
-                let chars: Vec<char> = line.chars().collect();
-                let mut start = 0;
-                while start < chars.len() {
-                    let end = (start + wrap_width).min(chars.len());
-                    let chunk: String = chars[start..end].iter().collect();
-                    lines.push(Line::from(chunk));
-                    start = end;
-                }
-            }
-        }
-    }
-
-    lines.push(Line::from(""));
-    let hint = if app.aside_popup.done {
-        "esc/space dismiss   \u{2191}\u{2193} scroll"
-    } else {
-        "esc dismiss   streaming..."
-    };
-    lines.push(
-        Line::from(Span::styled(hint.to_owned(), Style::default().fg(muted)))
-            .alignment(Alignment::Center),
-    );
-
-    let content_height = lines.len().min(popup_max_height) + 2;
-    let area = centered_popup(full, popup_width, content_height);
-
-    let scroll = app.aside_popup.scroll_offset;
-    let max_scroll = lines.len().saturating_sub(content_height.saturating_sub(2)) as u16;
-    if scroll > max_scroll {
-        app.aside_popup.scroll_offset = max_scroll;
-    }
-
-    let block = popup_block("aside", accent, muted);
-    let inner = block.inner(area);
-    frame.render_widget(Clear, area);
-    frame.render_widget(block, area);
-    frame.render_widget(
-        Paragraph::new(lines).scroll((app.aside_popup.scroll_offset, 0)),
-        inner,
-    );
+    let area = centered_popup(frame.area(), 80, 18);
     app.layout.aside_popup = Some(area);
+    let mut lines = vec![accent_line(app.aside_popup.question.clone())];
+    lines.push(empty_line());
+    if app.aside_popup.response.is_empty() && !app.aside_popup.done {
+        lines.push(muted_line("thinking..."));
+    } else {
+        let height = area.height.saturating_sub(5) as usize;
+        let start = app.aside_popup.scroll_offset as usize;
+        lines.extend(
+            app.aside_popup
+                .response
+                .lines()
+                .skip(start)
+                .take(height)
+                .map(|line| plain_line(line.to_string())),
+        );
+    }
+    let hint = if app.aside_popup.done {
+        "esc/space dismiss  up/down scroll"
+    } else {
+        "esc dismiss  streaming..."
+    };
+    render_crepus_rows(frame, app, area, "aside", &lines, Some(hint));
 }

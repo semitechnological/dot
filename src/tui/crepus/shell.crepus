@@ -33,28 +33,19 @@ div w-full h-full text-[#cdd6f4] flex-col
             div h-[1] text-[#89b4fa]
               "● {description} {detail}"
 
-    for message in {messages}
-      if {user}
-        div h-[{height}] border border-[#45475a] rounded pl-1 bg-[#09090b] text-[#cdd6f4] flex-col
-          div h-[1] text-[#585b70]
-            "{role}"
-          for line in {lines}
-            div h-[1] text-[#cdd6f4]
-              "{line}"
+    for row in {rows}
+      if {muted}
+        div h-[1] text-[#585b70]
+          "{text}"
+      else if {accent}
+        div h-[1] text-[#89b4fa]
+          "{text}"
+      else if {error}
+        div h-[1] text-[#f38ba8]
+          "{text}"
       else
-        div h-[{height}] border-b border-[#343648] text-[#cdd6f4] flex-col
-          div h-[1] text-[#585b70]
-            "{role}"
-          for line in {lines}
-            div h-[1] text-[#cdd6f4]
-              "{line}"
-
-    if {streaming}
-      div h-[4] border border-[#89b4fa] rounded pl-1 flex-col
-        div h-[1] text-[#89dceb]
-          "assistant streaming"
         div h-[1] text-[#cdd6f4]
-          "{streaming_text}"
+          "{text}"
 
   div h-[2] border-t border-[#343648] flex-row pl-1
     div w-[2] text-[#89b4fa] font-bold
